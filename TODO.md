@@ -39,6 +39,26 @@ persists to localStorage across refreshes. Light/dark theme throughout.
         algebraically and numerically (~1e-17) equivalent to the original
         `accel()` — see "Taper applies to net force, not to rolling
         resistance" in docs/acceleration_formulas.md
+  - [x] `simulate()` now also tracks a checkpoint at the tractive-threshold
+        speed (`vtCheckpoint`, alongside the existing `v95Checkpoint`) —
+        null when the consist has mixed locomotive types with different
+        power/tractive-effort ratios (no single threshold speed exists
+        then, see `buildDynamics`' `vt`) or when it's never reached (e.g.
+        capped by a lower track speed limit)
+  - [x] The Physics tab's Acceleration & Travel Time table defaults to a
+        simplified view — mass, power, effective TE, rolling resistance,
+        initial acceleration, and time/distance to top speed. Only the
+        tractive-threshold speed and its own milestone (plus the 95%
+        milestone) are hidden behind a "Detail level: Simplified/Detailed"
+        select (`state.accelerationDetail`, `js/main.js`) — those are the
+        rows that are genuinely confusing without knowing the internals;
+        everything else is either a basic spec or the headline number.
+        Mass/power are pulled straight from the aggregate and reuse
+        `TRAIN_SPEC_FIELDS`' exact labels/tooltips/formatting for
+        consistency with the Trains tab. Effective TE and rolling
+        resistance got dashed-underline tooltips too (2× nominal; and
+        `R = m · g · C, C = 0.002`, respectively), same `.info-tooltip`
+        pattern as elsewhere, replacing an inline "(2× nominal)" parenthetical
 - [x] Revenue formula (per passenger/cargo payment) — [docs/revenue_formulas.md](docs/revenue_formulas.md), `js/finance.js`
 - [x] Maintenance formula wired in (`js/finance.js`, "fixed over time" —
       always the operating rate, no station/depot state modeling)
@@ -68,9 +88,13 @@ persists to localStorage across refreshes. Light/dark theme throughout.
       locomotive auto-mirrors to face outward (`js/images.js`,
       `.chip-img--flipped`). A "Compact / Detailed" toggle switches all
       chips to also show the name inline
-- [x] Small green +/red ✕ controls beside each chip insert a new default
-      group after that position / remove that group; an icon-less
-      fallback "+ Add locomotive"/"+ Add wagon" appears only when a
+- [x] Small green +/red ✕ controls beside each chip insert a group after
+      that position / remove that group. + clones the chip it's on (same
+      vehicle type and quantity), not a generic default — a duplicated
+      group (e.g. another 3 of the same wagon) is what's wanted far more
+      often than reverting to the first vehicle in the list every time. An
+      icon-less fallback "+ Add locomotive"/"+ Add wagon" (still a plain
+      default, since there's no chip to clone from) appears only when a
       category is completely empty (bootstrapping safety net — normally
       unreachable since default trains and "+ Add train" both seed 1 of each)
 - [x] Clone-train button (📋, before the remove ✕) deep-copies a whole
@@ -138,9 +162,12 @@ persists to localStorage across refreshes. Light/dark theme throughout.
       the usual warning banner (no versioning/migration, by design)
 
 ## Comparison & graphs
-- [x] 4 comparison graphs: force vs. speed, acceleration vs. speed, speed
-      over time, distance over time — `js/charts.js`, vendored Chart.js
-      (`vendor/chart.umd.min.js`)
+- [x] 5 comparison graphs: force vs. speed, acceleration vs. speed, speed
+      over time, distance over time, speed over distance — `js/charts.js`,
+      vendored Chart.js (`vendor/chart.umd.min.js`). Speed-over-distance
+      reuses the same simulated trajectory samples as speed/distance-over-
+      time, just re-keyed on distance instead of time — no new physics,
+      but a more directly useful view since routes/legs are distance-based
 - [x] Hover tooltips (nearest-point, since line points are invisible until
       hovered — fixed a bug where `axis:"x"` made the tooltip flip between
       series on tiny mouse movements; `axis:"xy"` tracks the actually-closest
@@ -173,6 +200,25 @@ persists to localStorage across refreshes. Light/dark theme throughout.
         confined to whichever group it was opened from
         (`CHART_GROUPS`/`chartGroupOf()` in `js/charts.js`)
 - [ ] Profit-over-time graph, once a financial simulation (below) exists
+- [ ] Route graphs: acceleration and speed curves over each leg's actual
+      distance (using the leg's track distance when given, per
+      `js/route.js`), one graph set per leg rather than the current
+      unbounded-distance curves. Needs to include braking before the
+      station at the end of the leg, which needs two new pieces of
+      physics not modeled at all today:
+  - A single global braking deceleration parameter (vanilla TF2 default is
+        a flat -2.5 m/s², but make it user-customizable, similar to the
+        existing track speed limit setting)
+  - Given the train's speed at any point along the leg, the braking
+        distance/time needed to reach 0 (or the next speed limit) by the
+        station — straightforward with a flat deceleration (basic
+        kinematics, `v²=u²+2as`) but combining that with the existing
+        taper-based acceleration curve to find *where* along the leg
+        braking must start is the part worth double-checking once
+        underway
+  - Reference for other potentially interesting mechanics to explore:
+        Steam Workshop mods 3454209257 and 3238328414 (files under the
+        Workshop folder in the user's SteamLibrary on the S: drive)
 
 ## Financial features
 - [x] Per-leg and trip-total revenue, maintenance, profit, profit/real-hour,
@@ -194,6 +240,26 @@ persists to localStorage across refreshes. Light/dark theme throughout.
       hover instead of the line charts' custom `nearestWithinRadius` mode
       (built specifically for sparse, invisible-until-hover line points —
       bars don't have that problem)
+- [x] Trip Summary table has its own "Trip Summary" heading (was missing
+      one — every other table/mini-table on this tab has a heading, this
+      was the odd one out)
+- [x] Leg distance is shown alongside the leg name (`legLabelWithDistance()`
+      in `js/main.js`, e.g. "A → B (15.0 km)") on every per-leg table
+      heading ("Group by: Leg") and, per `LEG_METRIC_FIELDS.showLegDistance`,
+      on the Time and Average speed row labels specifically in "Group by:
+      Metric" mode — distance is directly relevant context for those two,
+      not for Revenue/Maintenance/Profit
+- [x] Finance bar charts use bare leg indices ("1", "2", ...) on the x-axis
+      instead of full "Station M → Station N" names — the axis is already
+      titled "Leg", and full names get unwieldy as a category axis; the
+      tables above keep the full names (+ distance, see above)
+- [x] Large currency figures collapse to "k"/"M" on the Finances tab
+      (`formatMoneyCompact()` in `js/vehicles.js`, e.g. "$1.2M" instead of
+      "$1,246,247") — used for Revenue/Maintenance/Profit in both the
+      per-leg/trip-summary tables and the finance bar charts' y-axis tick
+      labels. Vehicle prices elsewhere (Trains tab, chip tooltips) keep the
+      exact `formatMoney()` — purchase-price comparison benefits from
+      precision more than trip financials do
 - [x] Difficulty setting (revenue-only multiplier)
 - [x] Load factor (capacity utilization) override, defaults to 100% — now
       per-leg, set on the Route tab (see "Route & track" above), not a
@@ -217,6 +283,13 @@ persists to localStorage across refreshes. Light/dark theme throughout.
       extension of the same serialization, not yet built
 
 ## Infra / polish
+- [x] Links use the theme-aware `--accent` token (`a, a:visited` in
+      css/styles.css) instead of the browser default blue/purple — the
+      latter isn't dark-mode-aware and the default visited purple read
+      muddy against the dark background. Previously only `.site-footer a`
+      had a color rule, which happened to cover most links but missed the
+      one in the Physics tab's acceleration hint; now global, and the
+      redundant footer-specific rule was removed
 - [ ] GitHub Actions deploy workflow if the project ever needs a build step
       (not needed yet — plain static site deploys directly)
 - [ ] Accessibility pass on the tab/chip/popover UI (tabs and popovers use

@@ -80,6 +80,9 @@ export function loadState(vehicleById) {
   if (parsed.financeGroupBy === "metric" || parsed.financeGroupBy === "leg") {
     state.financeGroupBy = parsed.financeGroupBy;
   }
+  if (parsed.accelerationDetail === "simple" || parsed.accelerationDetail === "detailed") {
+    state.accelerationDetail = parsed.accelerationDetail;
+  }
   if (["trains", "graphs", "route", "financials"].includes(parsed.activeTab)) {
     state.activeTab = parsed.activeTab;
   }

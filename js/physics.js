@@ -97,7 +97,7 @@ export function simulate(aggregate, options) {
   if (!dynamics) return null;
   if (dynamics.warning) return dynamics;
 
-  const { m, accel, ownTopSpeed, k } = dynamics;
+  const { m, accel, ownTopSpeed, k, vt } = dynamics;
   const { initialSpeed_kmh = 0, trackSpeedLimit_kmh = null, stopAt, sample = false } = options;
 
   const effectiveTop = trackSpeedLimit_kmh != null ? Math.min(ownTopSpeed, trackSpeedLimit_kmh / 3.6) : ownTopSpeed;
@@ -107,6 +107,7 @@ export function simulate(aggregate, options) {
   let t = 0;
   let d = 0;
   let v95Checkpoint = null;
+  let vtCheckpoint = null; // null forever if vt is null (mixed-locomotive consist, see buildDynamics) or never reached (e.g. capped by a lower track speed limit)
 
   const rawSamples = sample ? [{ t, v_kmh: v * 3.6, d_m: d, a_ms2: accel(v) }] : null;
 
@@ -138,6 +139,7 @@ export function simulate(aggregate, options) {
     d += (step / 6) * (k1d + 2 * k2d + 2 * k3d + k4d);
     t += step;
 
+    if (!vtCheckpoint && vt != null && v >= vt) vtCheckpoint = { t, d };
     if (!v95Checkpoint && v >= v95) v95Checkpoint = { t, d };
     if (sample) rawSamples.push({ t, v_kmh: v * 3.6, d_m: d, a_ms2: accel(v) });
   }
@@ -162,6 +164,7 @@ export function simulate(aggregate, options) {
     time_s: t,
     distance_m: d,
     finalSpeed_kmh: v * 3.6,
+    vtCheckpoint,
     v95Checkpoint,
   };
   if (sample) result.samples = downsample(rawSamples, 200);
@@ -214,6 +217,8 @@ export function computeAccelerationStats(aggregate, trackSpeedLimit_kmh = null) 
     effectiveTractiveEffort_kN: dynamics.F0,
     tractiveThreshold_kmh: dynamics.vt != null ? dynamics.vt * 3.6 : null,
     initialAcceleration_ms2: dynamics.a0,
+    timeThreshold_s: result.vtCheckpoint?.t ?? null,
+    distanceThreshold_m: result.vtCheckpoint?.d ?? null,
     time95_s: result.v95Checkpoint?.t ?? null,
     distance95_m: result.v95Checkpoint?.d ?? null,
     totalTime_s: result.time_s,

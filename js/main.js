@@ -1,5 +1,5 @@
 import { initTheme } from "./theme.js";
-import { loadVehicles, formatValue, formatMoney, formatCompactSpec, ACCELERATION_FIELDS } from "./vehicles.js";
+import { loadVehicles, formatValue, formatMoneyCompact, formatCompactSpec, ACCELERATION_FIELDS } from "./vehicles.js";
 import {
   createTrain,
   cloneTrain,
@@ -15,7 +15,7 @@ import {
   TRAIN_SPEC_FIELDS,
   formatTrainSpecValue,
 } from "./train.js";
-import { createRoute, addStation, removeStation, estimateTrackDistance } from "./route.js";
+import { createRoute, addStation, removeStation, estimateTrackDistance, effectiveTrackDistance } from "./route.js";
 import { computeAccelerationStats } from "./physics.js";
 import { DIFFICULTY_FACTORS, tripSummary } from "./finance.js";
 import { renderCharts, renderFinanceCharts } from "./charts.js";
@@ -30,6 +30,7 @@ const state = {
   route: createRoute(),
   trackSpeedLimit_kmh: 300,
   difficultyKey: "easy",
+  accelerationDetail: "simple",
   financeGroupBy: "metric",
   chipView: "compact",
   activeTab: "trains",
@@ -266,8 +267,11 @@ function renderChip(train, trainIndex, item, type, indexInType, vehicle, isLastI
   );
 
   // Small per-group insert/remove controls, replacing the old strip-level
-  // "add locomotive"/"add wagon" buttons — + inserts a fresh default group
-  // of the same type right after this one; ✕ removes this specific group.
+  // "add locomotive"/"add wagon" buttons — + inserts a clone of *this*
+  // group (same vehicle type and quantity) right after it, rather than a
+  // fresh default — a duplicated group is far more often what's wanted
+  // (e.g. another 3 of the same wagon) than reverting to the first vehicle
+  // in the list; ✕ removes this specific group.
   const miniActions = document.createElement("div");
   miniActions.className = "chip-mini-actions";
 
@@ -275,13 +279,11 @@ function renderChip(train, trainIndex, item, type, indexInType, vehicle, isLastI
   addBtn.type = "button";
   addBtn.className = "chip-mini-add";
   addBtn.textContent = "+";
-  addBtn.title = `Insert ${type} after`;
-  addBtn.setAttribute("aria-label", `Insert ${type} after ${vehicle.name}`);
+  addBtn.title = `Duplicate this ${type}`;
+  addBtn.setAttribute("aria-label", `Duplicate ${vehicle.name}`);
   addBtn.addEventListener("click", () => {
-    const def = type === "locomotive" ? defaultLocomotive() : defaultWagon();
-    if (!def) return;
     const insert = type === "locomotive" ? insertLocomotive : insertWagon;
-    insert(train, indexInType + 1, def.id, 1);
+    insert(train, indexInType + 1, item.vehicleId, item.quantity);
     refreshTrainStrip(trainIndex);
     recompute();
   });
@@ -578,6 +580,13 @@ function appendDerivedRow(body, label, results, getValue, unit, digits) {
   body.appendChild(row);
 }
 
+function initAccelerationControls() {
+  document.getElementById("acceleration-detail-select").addEventListener("change", (e) => {
+    state.accelerationDetail = e.target.value;
+    recompute();
+  });
+}
+
 function renderAccelerationSection(aggregates) {
   const section = document.getElementById("acceleration-section");
   const head = document.getElementById("acceleration-table-head");
@@ -596,12 +605,34 @@ function renderAccelerationSection(aggregates) {
   buildHeaderRow(head, "Acceleration (to top speed)");
   body.innerHTML = "";
 
-  for (const field of ACCELERATION_FIELDS) {
+  const detailed = state.accelerationDetail === "detailed";
+
+  // Mass/Power are basic specs, always known regardless of whether the
+  // train can actually accelerate at all — sourced straight from the
+  // aggregate (not gated behind a physics warning like the fields below)
+  // and reusing the exact same field defs/formatting as the Trains tab
+  // (labelParts tooltip included) for consistency between the two tables.
+  for (const key of ["mass_t", "power_kW"]) {
+    const field = TRAIN_SPEC_FIELDS.find((f) => f.key === key);
     const row = document.createElement("tr");
-    const th = document.createElement("th");
-    th.scope = "row";
-    th.textContent = field.label + (field.note ? ` (${field.note})` : "");
-    row.appendChild(th);
+    row.appendChild(buildFieldHeaderCell(field));
+    for (const entry of aggregates) {
+      const td = document.createElement("td");
+      td.textContent = entry ? formatTrainSpecValue(entry.aggregate, field) : "—";
+      row.appendChild(td);
+    }
+    body.appendChild(row);
+  }
+
+  // Effective TE / Rolling resistance / Initial acceleration are always
+  // shown; Tractive threshold speed (detailOnly) and the milestone
+  // time/distance rows below are hidden in the simplified view — they're
+  // meaningless to a reader who doesn't already know what a "tractive
+  // threshold" is.
+  for (const field of ACCELERATION_FIELDS) {
+    if (field.detailOnly && !detailed) continue;
+    const row = document.createElement("tr");
+    row.appendChild(buildFieldHeaderCell(field));
     for (const result of results) {
       const td = document.createElement("td");
       td.textContent = result && !result.warning ? formatValue(result[field.key], field) : "—";
@@ -610,10 +641,14 @@ function renderAccelerationSection(aggregates) {
     body.appendChild(row);
   }
 
-  appendDerivedRow(body, "Time to 95% of top speed", results, (r) => r.time95_s, "s", 1);
-  appendDerivedRow(body, "Distance to 95% of top speed", results, (r) => r.distance95_m, "m", 0);
-  appendDerivedRow(body, "Time to exact top speed (asymptotic tail — see docs)", results, (r) => r.totalTime_s, "s", 1);
-  appendDerivedRow(body, "Distance to exact top speed (asymptotic tail — see docs)", results, (r) => r.totalDistance_m, "m", 0);
+  if (detailed) {
+    appendDerivedRow(body, "Time to tractive threshold", results, (r) => r.timeThreshold_s, "s", 1);
+    appendDerivedRow(body, "Distance to tractive threshold", results, (r) => r.distanceThreshold_m, "m", 0);
+    appendDerivedRow(body, "Time to 95% of top speed", results, (r) => r.time95_s, "s", 1);
+    appendDerivedRow(body, "Distance to 95% of top speed", results, (r) => r.distance95_m, "m", 0);
+  }
+  appendDerivedRow(body, "Time to top speed", results, (r) => r.totalTime_s, "s", 1);
+  appendDerivedRow(body, "Distance to top speed", results, (r) => r.totalDistance_m, "m", 0);
 
   const warnRow = document.createElement("tr");
   const warnTh = document.createElement("th");
@@ -662,6 +697,17 @@ function legLabel(index) {
   const from = state.route.stations[index]?.name ?? `Station ${index + 1}`;
   const to = state.route.stations[(index + 1) % n]?.name ?? `Station ${((index + 1) % n) + 1}`;
   return `${from} → ${to}`;
+}
+
+// legLabel() plus the leg's actual distance (track distance, falling back
+// to crow-flies — same value the Time/Average speed figures are computed
+// over), e.g. "A → B (15.0 km)". Used for the per-leg table headings
+// ("Group by: Leg") and, per LEG_METRIC_FIELDS.showLegDistance, for row
+// labels where the distance is directly relevant context.
+function legLabelWithDistance(index) {
+  const distance_m = effectiveTrackDistance(state.route.legs[index]);
+  const distance = distance_m != null ? ` (${formatValue(distance_m / 1000, { unit: "km", digits: 1 })})` : "";
+  return `${legLabel(index)}${distance}`;
 }
 
 // Renders the route table from scratch — one row per stop, holding that
@@ -856,12 +902,15 @@ function rebuildRoute() {
 // Single source of truth for the per-leg metrics shown on the Finances tab
 // (both grouping modes below) — key must match a field on a
 // js/finance.js tripSummary() leg entry.
+// showLegDistance: leg distance is directly relevant context for these two
+// (see legLabelWithDistance) — appended to their row labels in "Group by:
+// Metric" mode; the other three don't need the reminder.
 const LEG_METRIC_FIELDS = [
-  { key: "time_s", label: "Time", format: (v) => formatValue(v, { unit: "s", digits: 1 }) },
-  { key: "avgSpeed_kmh", label: "Average speed", format: (v) => formatValue(v, { unit: "km/h", digits: 1 }) },
-  { key: "revenue", label: "Revenue", format: formatMoney },
-  { key: "maintenance", label: "Maintenance", format: formatMoney },
-  { key: "profit", label: "Profit", format: formatMoney },
+  { key: "time_s", label: "Time", format: (v) => formatValue(v, { unit: "s", digits: 1 }), showLegDistance: true },
+  { key: "avgSpeed_kmh", label: "Average speed", format: (v) => formatValue(v, { unit: "km/h", digits: 1 }), showLegDistance: true },
+  { key: "revenue", label: "Revenue", format: formatMoneyCompact },
+  { key: "maintenance", label: "Maintenance", format: formatMoneyCompact },
+  { key: "profit", label: "Profit", format: formatMoneyCompact },
 ];
 
 function initFinanceControls() {
@@ -936,12 +985,12 @@ function renderLegBreakdown(summaries) {
         label: field.label,
         getValue: (s) => field.format(s.legs[i][field.key]),
       }));
-      buildFinanceGroupTable(container, legLabel(i), "Metric", rows, summaries);
+      buildFinanceGroupTable(container, legLabelWithDistance(i), "Metric", rows, summaries);
     });
   } else {
     LEG_METRIC_FIELDS.forEach((field) => {
       const rows = state.route.legs.map((_, i) => ({
-        label: legLabel(i),
+        label: field.showLegDistance ? legLabelWithDistance(i) : legLabel(i),
         getValue: (s) => field.format(s.legs[i][field.key]),
       }));
       buildFinanceGroupTable(container, field.label, "Leg", rows, summaries);
@@ -957,11 +1006,11 @@ function renderTripSummary(summaries) {
 
   const rows = [
     ["Total time", (s) => formatValue(s.totalTime_s, { unit: "s", digits: 1 })],
-    ["Total revenue", (s) => formatMoney(s.totalRevenue)],
-    ["Maintenance for this trip", (s) => formatMoney(s.maintenanceForTrip)],
-    ["Profit", (s) => formatMoney(s.profit)],
-    ["Profit per real hour", (s) => formatMoney(s.profitPerRealHour)],
-    ["Profit per game year", (s) => formatMoney(s.profitPerGameYear)],
+    ["Total revenue", (s) => formatMoneyCompact(s.totalRevenue)],
+    ["Maintenance for this trip", (s) => formatMoneyCompact(s.maintenanceForTrip)],
+    ["Profit", (s) => formatMoneyCompact(s.profit)],
+    ["Profit per real hour", (s) => formatMoneyCompact(s.profitPerRealHour)],
+    ["Profit per game year", (s) => formatMoneyCompact(s.profitPerGameYear)],
   ];
 
   for (const [label, fmt] of rows) {
@@ -986,7 +1035,11 @@ function renderFinance(aggregates) {
   renderLegBreakdown(summaries);
   renderTripSummary(summaries);
 
-  const legLabels = state.route.legs.map((_, i) => legLabel(i));
+  // Bare indices, not full station-pair names — the x-axis is already
+  // titled "Leg" (see js/charts.js), and the full "Station M → Station N"
+  // names get unwieldy fast as a chart category axis. Full names + distance
+  // are still shown in the tables above (legLabel()/legLabelWithDistance()).
+  const legLabels = state.route.legs.map((_, i) => String(i + 1));
   const chartTrains = aggregates.map((entry, i) => (entry && summaries[i] ? { label: entry.label, summary: summaries[i] } : null));
   renderFinanceCharts(chartTrains, legLabels);
 }
@@ -1019,6 +1072,7 @@ function recompute() {
 }
 
 function applyLoadedUIState() {
+  document.getElementById("acceleration-detail-select").value = state.accelerationDetail;
   document.getElementById("difficulty-select").value = state.difficultyKey;
   document.getElementById("finance-group-by-select").value = state.financeGroupBy;
   document.getElementById("chip-view-select").value = state.chipView;
@@ -1054,6 +1108,7 @@ async function init() {
   if (warning) showWarning(warning);
 
   initTrainListControls();
+  initAccelerationControls();
   initRouteControls();
   initFinanceControls();
   initTheme(() => renderCharts(aggregatesWithLabels(), state.trackSpeedLimit_kmh));

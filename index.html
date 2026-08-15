@@ -58,10 +58,15 @@
         <h3>Acceleration &amp; Travel Time</h3>
         <p class="hint">
           Flat straight track, from a standing start, capped by the track speed limit below if set.
-          "Time/distance to exact top speed" is large by nature — the last fraction of a percent is
-          an asymptotic crawl, not a measurement error. See
-          <a href="docs/acceleration_formulas.md">acceleration_formulas.md</a>.
+          See <a href="docs/acceleration_formulas.md">acceleration_formulas.md</a> for more details.
         </p>
+        <div class="control-row">
+          <label for="acceleration-detail-select">Detail level</label>
+          <select id="acceleration-detail-select">
+            <option value="simple" selected>Simplified</option>
+            <option value="detailed">Detailed</option>
+          </select>
+        </div>
         <div class="table-wrap">
           <table id="acceleration-table" class="compare-table">
             <thead><tr id="acceleration-table-head"></tr></thead>
@@ -90,6 +95,11 @@
           <h3>Distance over Time</h3>
           <button class="chart-maximize" type="button" data-chart-id="chart-distance" title="Maximize" aria-label="Maximize Distance over Time">⛶</button>
           <div class="chart-canvas-wrap"><canvas id="chart-distance"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Speed over Distance</h3>
+          <button class="chart-maximize" type="button" data-chart-id="chart-speed-distance" title="Maximize" aria-label="Maximize Speed over Distance">⛶</button>
+          <div class="chart-canvas-wrap"><canvas id="chart-speed-distance"></canvas></div>
         </div>
       </div>
     </section>
@@ -147,11 +157,14 @@
 
       <div id="leg-breakdown-container"></div>
 
-      <div class="table-wrap">
-        <table id="trip-summary-table" class="compare-table">
-          <thead><tr id="trip-summary-head"></tr></thead>
-          <tbody id="trip-summary-body"></tbody>
-        </table>
+      <div class="finance-group">
+        <h3>Trip Summary</h3>
+        <div class="table-wrap">
+          <table id="trip-summary-table" class="compare-table">
+            <thead><tr id="trip-summary-head"></tr></thead>
+            <tbody id="trip-summary-body"></tbody>
+          </table>
+        </div>
       </div>
 
       <div class="chart-grid">

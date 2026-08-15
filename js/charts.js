@@ -1,4 +1,5 @@
 import { forceAtSpeed, accelerationAtSpeed, simulate } from "./physics.js";
+import { formatMoneyCompact } from "./vehicles.js";
 
 // Chart.js and its zoom plugin are loaded globally via plain <script> tags
 // (vendor/chart.umd.min.js, vendor/chartjs-plugin-zoom.umd.min.js) before
@@ -57,7 +58,7 @@ function themeColors() {
 // navigation stays confined to whichever group it was opened from — see
 // chartGroupOf().
 export const CHART_GROUPS = {
-  physics: ["chart-force", "chart-acceleration", "chart-speed", "chart-distance"],
+  physics: ["chart-force", "chart-acceleration", "chart-speed", "chart-distance", "chart-speed-distance"],
   finance: ["chart-leg-time", "chart-leg-speed", "chart-leg-revenue", "chart-leg-maintenance", "chart-leg-profit"],
 };
 
@@ -70,6 +71,7 @@ export const CHART_TITLES = {
   "chart-acceleration": "Acceleration vs. Speed",
   "chart-speed": "Speed over Time",
   "chart-distance": "Distance over Time",
+  "chart-speed-distance": "Speed over Distance",
   "chart-leg-time": "Time per Leg",
   "chart-leg-speed": "Average Speed per Leg",
   "chart-leg-revenue": "Revenue per Leg",
@@ -80,9 +82,9 @@ export const CHART_TITLES = {
 const LEG_CHART_METRICS = [
   { id: "chart-leg-time", yLabel: "Time (s)", key: "time_s" },
   { id: "chart-leg-speed", yLabel: "Speed (km/h)", key: "avgSpeed_kmh" },
-  { id: "chart-leg-revenue", yLabel: "Revenue ($)", key: "revenue" },
-  { id: "chart-leg-maintenance", yLabel: "Maintenance ($)", key: "maintenance" },
-  { id: "chart-leg-profit", yLabel: "Profit ($)", key: "profit" },
+  { id: "chart-leg-revenue", yLabel: "Revenue ($)", key: "revenue", isMoney: true },
+  { id: "chart-leg-maintenance", yLabel: "Maintenance ($)", key: "maintenance", isMoney: true },
+  { id: "chart-leg-profit", yLabel: "Profit ($)", key: "profit", isMoney: true },
 ];
 
 const POINT_COUNT = 120;
@@ -98,7 +100,7 @@ const lastConfigs = {}; // canvasId -> last-rendered chart config, reused by js/
  * discrete categories, one bar per train per leg).
  */
 export function renderChartInto(canvas, config, { zoomEnabled = false } = {}) {
-  const { type = "line", yLabel, datasets } = config;
+  const { type = "line", yLabel, datasets, isMoney = false } = config;
   const isBar = type === "bar";
   const colors = themeColors();
 
@@ -160,7 +162,9 @@ export function renderChartInto(canvas, config, { zoomEnabled = false } = {}) {
             },
         y: {
           title: { display: true, text: yLabel, color: colors.text },
-          ticks: { color: colors.textMuted },
+          // Revenue/Maintenance/Profit can run into six or seven figures —
+          // "$1.2M" instead of "$1,246,247" repeated at every gridline.
+          ticks: { color: colors.textMuted, callback: isMoney ? (value) => formatMoneyCompact(value) : undefined },
           grid: { color: colors.border },
         },
       },
@@ -220,6 +224,7 @@ export function renderCharts(trains, trackSpeedLimit_kmh) {
   const accelDatasets = [];
   const speedDatasets = [];
   const distanceDatasets = [];
+  const speedDistanceDatasets = [];
 
   trains.forEach((train, seriesIndex) => {
     if (!train) return;
@@ -232,6 +237,11 @@ export function renderCharts(trains, trackSpeedLimit_kmh) {
     if (result && !result.warning) {
       speedDatasets.push({ label, seriesIndex, points: result.samples.map((s) => ({ x: s.t, y: s.v_kmh })) });
       distanceDatasets.push({ label, seriesIndex, points: result.samples.map((s) => ({ x: s.t, y: s.d_m })) });
+      // Same trajectory samples as the two charts above, just re-keyed on
+      // distance instead of time — routes are defined by leg distance, so
+      // "what speed am I at after covering X" is often the more directly
+      // useful question than the time-based equivalent.
+      speedDistanceDatasets.push({ label, seriesIndex, points: result.samples.map((s) => ({ x: s.d_m, y: s.v_kmh })) });
     }
   });
 
@@ -239,6 +249,7 @@ export function renderCharts(trains, trackSpeedLimit_kmh) {
   renderCardChart("chart-acceleration", { xLabel: "Speed (km/h)", yLabel: "Acceleration (m/s²)", datasets: accelDatasets });
   renderCardChart("chart-speed", { xLabel: "Time (s)", yLabel: "Speed (km/h)", datasets: speedDatasets });
   renderCardChart("chart-distance", { xLabel: "Time (s)", yLabel: "Distance (m)", datasets: distanceDatasets });
+  renderCardChart("chart-speed-distance", { xLabel: "Distance (m)", yLabel: "Speed (km/h)", datasets: speedDistanceDatasets });
 }
 
 /**
@@ -254,6 +265,6 @@ export function renderFinanceCharts(trains, legLabels) {
       if (!train) return;
       datasets.push({ label: train.label, seriesIndex, data: train.summary.legs.map((leg) => leg[metric.key]) });
     });
-    renderCardChart(metric.id, { type: "bar", xLabels: legLabels, yLabel: metric.yLabel, datasets });
+    renderCardChart(metric.id, { type: "bar", xLabels: legLabels, yLabel: metric.yLabel, isMoney: metric.isMoney, datasets });
   }
 }
