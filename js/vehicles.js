@@ -6,30 +6,35 @@ export async function loadVehicles() {
   return response.json();
 }
 
-// Ordered fields shown in the comparison table.
-// This is a placeholder set until real game formulas define derived stats.
-export const COMPARE_FIELDS = [
-  { key: "category", label: "Category" },
-  { key: "length_m", label: "Length", unit: "m" },
-  { key: "weight_t", label: "Weight", unit: "t" },
-  { key: "maxSpeed_kmh", label: "Max speed", unit: "km/h" },
-  { key: "power_kW", label: "Power", unit: "kW" },
-  { key: "tractiveEffort_kN", label: "Tractive effort", unit: "kN" },
-  { key: "capacity", label: "Capacity", unitKey: "capacityUnit" },
-  { key: "purchaseCost", label: "Purchase cost", format: "currency" },
+// Computed (physics-derived) fields, locomotives only. See js/physics.js.
+export const ACCELERATION_FIELDS = [
+  { key: "rollingResistance_kN", label: "Rolling resistance", unit: "kN", digits: 1 },
+  { key: "effectiveTractiveEffort_kN", label: "Effective tractive effort", unit: "kN", note: "2× nominal" },
+  { key: "tractiveThreshold_kmh", label: "Tractive threshold speed", unit: "km/h", digits: 1 },
+  { key: "initialAcceleration_ms2", label: "Initial acceleration", unit: "m/s²", digits: 3 },
 ];
 
-export function formatFieldValue(vehicle, field) {
-  const value = vehicle[field.key];
+export function formatValue(value, { unit, digits } = {}) {
   if (value === undefined || value === null || value === "") return "—";
+  const num = typeof value === "number" ? (digits !== undefined ? value.toFixed(digits) : value) : value;
+  return unit ? `${num} ${unit}` : `${num}`;
+}
 
-  if (field.format === "currency") {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
-  }
+// TF2's in-game currency isn't real-world USD, so this formats as a plain
+// grouped number with a generic "$" prefix rather than using Intl's
+// currency style (which would print a locale-dependent "USD"/"$US" suffix).
+export function formatMoney(value) {
+  if (value === undefined || value === null) return "—";
+  return `$${new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)}`;
+}
 
-  const unit = field.unitKey ? vehicle[field.unitKey] : field.unit;
-  if (unit && unit !== "n/a") {
-    return `${value} ${unit}`;
+/** Compact one-line spec summary for a consist-list entry, e.g. "30t, $243,886, 40 km/h". */
+export function formatCompactSpec(vehicle) {
+  const parts = [`${vehicle.mass_t}t`, formatMoney(vehicle.price), `${vehicle.topSpeed_kmh} km/h`];
+  if (vehicle.kind === "locomotive") {
+    parts.push(`${vehicle.power_kW} kW`, `${vehicle.tractiveEffort_kN} kN nom.`);
+  } else if (vehicle.capacity > 0) {
+    parts.push(`${vehicle.capacity} ${vehicle.capacityUnit}`);
   }
-  return `${value}`;
+  return parts.join(", ");
 }

@@ -9,43 +9,150 @@
 <body>
   <header class="site-header">
     <h1>TF2 Sim</h1>
-    <p class="tagline">Vehicle performance &amp; profit calculator for Transport Fever 2</p>
+    <p class="tagline">Train performance &amp; profit calculator for Transport Fever 2</p>
     <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle light/dark theme">
       <span class="theme-toggle-icon" aria-hidden="true">🌙</span>
     </button>
   </header>
 
   <main>
-    <section class="compare-section" aria-labelledby="compare-heading">
-      <h2 id="compare-heading">Compare Vehicles</h2>
-      <p class="hint">Pick up to two vehicles to compare their specs side by side. (Data shown is placeholder — real vehicle data and derived stats are coming.)</p>
+    <section aria-labelledby="trains-heading">
+      <h2 id="trains-heading">Build &amp; Compare Trains</h2>
+      <p class="hint">Add one or more locomotives and any number of wagons to each train.</p>
 
-      <div class="slot-row">
-        <div class="vehicle-slot" data-slot="0">
-          <label for="vehicle-select-0">Vehicle 1</label>
-          <select id="vehicle-select-0" class="vehicle-select"></select>
+      <div class="train-panels">
+        <div class="train-panel" data-slot="0">
+          <h3>Train 1</h3>
+          <div class="add-row">
+            <select class="add-locomotive-select" aria-label="Locomotive to add to Train 1"></select>
+            <button class="add-locomotive-btn" type="button">Add locomotive</button>
+          </div>
+          <div class="add-row">
+            <select class="add-wagon-select" aria-label="Wagon to add to Train 1"></select>
+            <input class="add-wagon-qty" type="number" min="1" value="1" aria-label="Quantity">
+            <button class="add-wagon-btn" type="button">Add wagon</button>
+          </div>
+          <ul class="consist-list"></ul>
         </div>
-        <div class="vehicle-slot" data-slot="1">
-          <label for="vehicle-select-1">Vehicle 2</label>
-          <select id="vehicle-select-1" class="vehicle-select"></select>
+        <div class="train-panel" data-slot="1">
+          <h3>Train 2</h3>
+          <div class="add-row">
+            <select class="add-locomotive-select" aria-label="Locomotive to add to Train 2"></select>
+            <button class="add-locomotive-btn" type="button">Add locomotive</button>
+          </div>
+          <div class="add-row">
+            <select class="add-wagon-select" aria-label="Wagon to add to Train 2"></select>
+            <input class="add-wagon-qty" type="number" min="1" value="1" aria-label="Quantity">
+            <button class="add-wagon-btn" type="button">Add wagon</button>
+          </div>
+          <ul class="consist-list"></ul>
         </div>
       </div>
 
       <div class="table-wrap">
-        <table id="compare-table" class="compare-table">
-          <thead>
-            <tr id="compare-table-head"></tr>
-          </thead>
-          <tbody id="compare-table-body"></tbody>
+        <table id="train-spec-table" class="compare-table">
+          <thead><tr id="train-spec-head"></tr></thead>
+          <tbody id="train-spec-body"></tbody>
+        </table>
+      </div>
+
+      <section id="acceleration-section" hidden>
+        <h3>Acceleration &amp; Travel Time</h3>
+        <p class="hint">
+          Flat straight track, from a standing start, capped by the track speed limit below if set.
+          "Time/distance to exact top speed" is large by nature — the last fraction of a percent is
+          an asymptotic crawl, not a measurement error. See
+          <a href="docs/acceleration_formulas.md">acceleration_formulas.md</a>.
+        </p>
+        <div class="table-wrap">
+          <table id="acceleration-table" class="compare-table">
+            <thead><tr id="acceleration-table-head"></tr></thead>
+            <tbody id="acceleration-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <section aria-labelledby="graphs-heading">
+      <h2 id="graphs-heading">Performance Graphs</h2>
+      <div class="chart-grid">
+        <div class="chart-card">
+          <h3>Force vs. Speed</h3>
+          <canvas id="chart-force"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>Acceleration vs. Speed</h3>
+          <canvas id="chart-acceleration"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>Speed over Time</h3>
+          <canvas id="chart-speed"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>Distance over Time</h3>
+          <canvas id="chart-distance"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="route-heading">
+      <h2 id="route-heading">Route</h2>
+      <div class="control-row">
+        <label for="track-speed-limit-select">Track speed limit</label>
+        <select id="track-speed-limit-select">
+          <option value="none">None</option>
+          <option value="120">120 km/h</option>
+          <option value="300" selected>300 km/h</option>
+          <option value="custom">Custom&hellip;</option>
+        </select>
+        <input id="track-speed-limit-custom" type="number" min="1" placeholder="km/h" hidden>
+      </div>
+      <p class="hint">
+        A global cap on achieved speed. Doesn't affect where each train's own acceleration taper
+        starts — that's always tied to its own rated top speed.
+      </p>
+
+      <div id="station-list"></div>
+      <button id="add-station-btn" type="button">Add station</button>
+    </section>
+
+    <section aria-labelledby="finance-heading">
+      <h2 id="finance-heading">Financials</h2>
+      <div class="control-row">
+        <label for="difficulty-select">Difficulty</label>
+        <select id="difficulty-select">
+          <option value="easy" selected>Easy (100%)</option>
+          <option value="medium">Medium (80%)</option>
+          <option value="hard">Hard (60%)</option>
+          <option value="veryHard">Very Hard (40%)</option>
+        </select>
+        <label for="load-factor-input">Load factor</label>
+        <input id="load-factor-input" type="number" min="0" max="100" value="100">
+        <span>%</span>
+      </div>
+      <p class="hint">Revenue assumes this load factor of capacity filled on every leg, every trip.</p>
+
+      <div class="table-wrap">
+        <table id="leg-breakdown-table" class="compare-table">
+          <thead><tr id="leg-breakdown-head"></tr></thead>
+          <tbody id="leg-breakdown-body"></tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap">
+        <table id="trip-summary-table" class="compare-table">
+          <thead><tr id="trip-summary-head"></tr></thead>
+          <tbody id="trip-summary-body"></tbody>
         </table>
       </div>
     </section>
   </main>
 
   <footer class="site-footer">
-    <p>Skeleton build &mdash; see <a href="TODO.md">TODO.md</a> for the feature roadmap.</p>
+    <p>See <a href="TODO.md">TODO.md</a> for the feature roadmap.</p>
   </footer>
 
+  <script src="vendor/chart.umd.min.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

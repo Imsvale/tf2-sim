@@ -14,7 +14,8 @@ function currentEffectiveTheme() {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-export function initTheme() {
+/** @param {() => void} [onChange] - called after the theme toggles, e.g. to re-color charts */
+export function initTheme(onChange) {
   const stored = localStorage.getItem(STORAGE_KEY);
   applyTheme(stored);
 
@@ -32,5 +33,6 @@ export function initTheme() {
     applyTheme(next);
     localStorage.setItem(STORAGE_KEY, next);
     updateIcon();
+    onChange?.();
   });
 }
