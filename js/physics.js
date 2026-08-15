@@ -56,9 +56,20 @@ function buildDynamics(aggregate) {
   const ratios = new Set(units.map((u) => (u.P / u.F).toFixed(6)));
   const vt = ratios.size === 1 ? units[0].P / units[0].F : null;
 
-  const accel = (v) => ((driveForce(v) - R) / m) * (1 - taperFactor(v, k));
+  // Taper applies to net force only, never to rolling resistance — R is a
+  // flat penalty subtracted at full strength regardless of speed (the
+  // source's own description is "a = a * (1 - f(v))", i.e. the taper
+  // multiplies the already-net acceleration, not the raw drive force).
+  // effectiveForce is the force-domain quantity that reproduces that exact
+  // acceleration through the ordinary a = (F - R) / m relationship, so the
+  // Force-vs-speed graph and the Acceleration-vs-speed graph agree with
+  // each other rather than one silently double-counting friction's taper.
+  // (Naively tapering just F_drive and then subtracting a full, untapered
+  // R would under-count net force by R * taper(v) — friction doesn't taper.)
+  const effectiveForce = (v) => R + (driveForce(v) - R) * (1 - taperFactor(v, k));
+  const accel = (v) => (effectiveForce(v) - R) / m;
 
-  return { m, R, F0, vt, a0, k, ownTopSpeed, accel, driveForce };
+  return { m, R, F0, vt, a0, k, ownTopSpeed, accel, driveForce, effectiveForce };
 }
 
 const RK4_DT = 0.02; // seconds
@@ -165,11 +176,16 @@ function downsample(samples, maxPoints) {
   return out;
 }
 
-/** Drive force at a given speed (kN), for the force-vs-speed graph. */
+/**
+ * Effective (taper-applied) force at a given speed (kN), for the
+ * force-vs-speed graph — see buildDynamics' effectiveForce comment for why
+ * this, and not the raw drive force, is what should be plotted: it's the
+ * force-domain quantity consistent with the actual (tapered) acceleration.
+ */
 export function forceAtSpeed(aggregate, v_kmh) {
   const dynamics = buildDynamics(aggregate);
   if (!dynamics || dynamics.warning) return null;
-  return dynamics.driveForce(v_kmh / 3.6);
+  return dynamics.effectiveForce(v_kmh / 3.6);
 }
 
 /** Acceleration at a given speed (m/s²), including taper, for the acceleration-vs-speed graph. */

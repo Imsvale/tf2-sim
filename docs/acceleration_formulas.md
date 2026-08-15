@@ -125,6 +125,40 @@ approximation isn't worth the uncertainty it'd introduce. It's cheap
 > knowing if you see it referenced elsewhere (e.g. the original Desmos
 > sheet, which still has it as its own phase-3 approach).
 
+### Taper applies to net force, not to rolling resistance
+
+`a = a_raw · (1 − f(v))` taper the *whole net acceleration* — i.e. it acts
+on `(F_drive − R)`, after `R` has already been subtracted, not on `F_drive`
+alone. `R` (rolling resistance) is a flat penalty at every speed; the game
+doesn't taper friction, only the locomotive's own force output.
+
+This matters once you want a force-domain curve (e.g. a force-vs-speed
+graph) that's consistent with the tapered acceleration. Naively tapering
+just the raw drive force and then subtracting a full, untapered `R`:
+
+```
+F_naive(v) = F_drive(v) · (1 − f(v))
+a_wrong(v) = (F_naive(v) − R) / m        # NOT equal to the real a(v)
+```
+
+under-counts net force by `R · f(v)` — friction gets penalized twice near
+top speed. The correct force-domain quantity, derived by requiring
+`(F_effective − R)/m` to reproduce the real `a(v)` exactly:
+
+```
+F_effective(v) = R + (F_drive(v) − R) · (1 − f(v))
+```
+
+`js/physics.js` implements `accel(v)` as `(F_effective(v) − R) / m` (a pure
+refactor of the same formula — verified numerically identical to the
+previous direct implementation across multiple vehicles, differences at
+float-precision noise level, ~1e-17), and `forceAtSpeed()` (used by the
+force-vs-speed graph) returns `F_effective`, not the raw `F_drive` — so the
+graph now visibly tapers near top speed the same way the acceleration graph
+does, rather than showing an idealized, untapered force curve. Below `v_95`
+the two are identical (`f(v) = 0` there), so this only changes anything in
+the last ~5% of the speed range.
+
 ## Totals
 
 ```

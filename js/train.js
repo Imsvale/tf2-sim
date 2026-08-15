@@ -9,7 +9,12 @@ const PASSENGER_MASS_T = 0.2;
 const CARGO_MASS_T = 1.2;
 
 // A train is a consist: one or more locomotives, zero or more wagons, each
-// referenced by vehicle id with a quantity. See docs/ for why top speed is
+// an independent, *positional* group — {vehicleId, quantity} addressed by
+// its index in the array, not deduplicated by vehicleId. This lets the same
+// vehicle type appear as two separate groups in different positions (e.g.
+// 3 boxcars, then 2 tankers, then 2 more boxcars) — necessary for the
+// insert-a-new-group-after-this-one UI in js/main.js. Every mutator below
+// therefore takes an index, not a vehicleId. See docs/ for why top speed is
 // the minimum across every consist member (locomotives AND wagons — a slow
 // wagon holds the whole train back, same as a slow locomotive would).
 //
@@ -20,46 +25,57 @@ const CARGO_MASS_T = 1.2;
 // as one big locomotive overstates force (by up to 50%+ in the mixed
 // force-/power-limited regime) whenever locomotives differ. So
 // `aggregateTrain` keeps `power_kW`/`tractiveEffort_kN` as simple sums for
-// *display* only, and separately exposes `locomotiveUnits` (grouped by
-// vehicle type) for js/physics.js to compute the force curve correctly.
+// *display* only, and separately exposes `locomotiveUnits` (one entry per
+// group, NOT merged by vehicle type) for js/physics.js to compute the force
+// curve correctly — summing two same-type groups separately is
+// mathematically identical to summing one combined group, so this needs no
+// special handling for the positional model above.
 
 export function createTrain() {
-  return { locomotives: [], wagons: [] };
+  return { locomotives: [], wagons: [], name: null };
 }
 
-export function addLocomotive(train, vehicleId, quantity = 1) {
-  addOrIncrement(train.locomotives, vehicleId, quantity);
+/** Deep-copies a train's consist so the clone shares no mutable state with the original. Does NOT
+ *  copy the source's custom name — two identically-labeled trains would be harder to tell apart
+ *  in tables/charts than the default "Train N", so the clone starts unnamed. */
+export function cloneTrain(train) {
+  return {
+    name: null,
+    locomotives: train.locomotives.map((item) => ({ ...item })),
+    wagons: train.wagons.map((item) => ({ ...item })),
+  };
 }
 
-export function addWagon(train, vehicleId, quantity = 1) {
-  addOrIncrement(train.wagons, vehicleId, quantity);
+export function insertLocomotive(train, index, vehicleId, quantity = 1) {
+  train.locomotives.splice(index, 0, { vehicleId, quantity });
 }
 
-function addOrIncrement(list, vehicleId, quantity) {
-  const existing = list.find((item) => item.vehicleId === vehicleId);
-  if (existing) existing.quantity += quantity;
-  else list.push({ vehicleId, quantity });
+export function insertWagon(train, index, vehicleId, quantity = 1) {
+  train.wagons.splice(index, 0, { vehicleId, quantity });
 }
 
-export function removeLocomotive(train, vehicleId) {
-  train.locomotives = train.locomotives.filter((item) => item.vehicleId !== vehicleId);
+export function removeLocomotiveAt(train, index) {
+  train.locomotives.splice(index, 1);
 }
 
-export function removeWagon(train, vehicleId) {
-  train.wagons = train.wagons.filter((item) => item.vehicleId !== vehicleId);
+export function removeWagonAt(train, index) {
+  train.wagons.splice(index, 1);
 }
 
-export function setLocomotiveQuantity(train, vehicleId, quantity) {
-  setQuantity(train.locomotives, vehicleId, quantity);
+export function setLocomotiveQuantityAt(train, index, quantity) {
+  train.locomotives[index].quantity = Math.max(1, Math.floor(quantity) || 1);
 }
 
-export function setWagonQuantity(train, vehicleId, quantity) {
-  setQuantity(train.wagons, vehicleId, quantity);
+export function setWagonQuantityAt(train, index, quantity) {
+  train.wagons[index].quantity = Math.max(1, Math.floor(quantity) || 1);
 }
 
-function setQuantity(list, vehicleId, quantity) {
-  const item = list.find((i) => i.vehicleId === vehicleId);
-  if (item) item.quantity = Math.max(1, Math.floor(quantity) || 1);
+export function setLocomotiveTypeAt(train, index, vehicleId) {
+  train.locomotives[index].vehicleId = vehicleId;
+}
+
+export function setWagonTypeAt(train, index, vehicleId) {
+  train.wagons[index].vehicleId = vehicleId;
 }
 
 export function isEmpty(train) {
@@ -129,13 +145,39 @@ export function aggregateTrain(train, vehicleById) {
 }
 
 // Fields shown in the train-vs-train aggregate spec comparison table.
+// `labelParts`, when present, is how a row header gets a dashed-underline
+// info tooltip on part (or all) of its text — an array of plain strings and
+// { text, tooltip } spans, rendered by js/main.js's buildFieldHeaderCell.
+// `label` is kept as a plain-text fallback alongside it (accessibility/aria
+// uses, and for fields that don't need a tooltip at all).
 export const TRAIN_SPEC_FIELDS = [
   { key: "locomotiveCount", label: "Locomotives" },
   { key: "wagonCount", label: "Wagons" },
-  { key: "mass_t", label: "Total mass", unit: "t", note: "incl. full passenger/cargo load" },
+  {
+    key: "mass_t",
+    label: "Total mass",
+    unit: "t",
+    labelParts: [
+      { text: "Total mass", tooltip: "Includes full passenger/cargo load, assuming the train is always fully loaded." },
+    ],
+  },
   { key: "power_kW", label: "Total power", unit: "kW" },
-  { key: "tractiveEffort_kN", label: "Tractive effort (nominal)", unit: "kN", note: "2× applied in physics" },
-  { key: "topSpeed_kmh", label: "Top speed", unit: "km/h", note: "slowest consist member" },
+  {
+    key: "tractiveEffort_kN",
+    label: "Tractive effort (nominal)",
+    unit: "kN",
+    labelParts: [
+      "Tractive effort (",
+      { text: "nominal", tooltip: "Game uses 2× TE in the physics simulation. See Physics section." },
+      ")",
+    ],
+  },
+  {
+    key: "topSpeed_kmh",
+    label: "Top speed",
+    unit: "km/h",
+    labelParts: [{ text: "Top speed", tooltip: "Lowest top speed of all units in the consist." }],
+  },
   { key: "passengerCapacity", label: "Passenger capacity" },
   { key: "cargoCapacity", label: "Cargo capacity" },
   { key: "price", label: "Total price", format: "money" },

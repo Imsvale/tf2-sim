@@ -31,11 +31,11 @@ export function paymentPerUnit(distance_m, topSpeed_kmh, cargoFactor, difficulty
  * cargo capacity are priced separately (cargoFactor 1 vs 1.75); the
  * specific cargo *type* doesn't affect price.
  */
-export function legRevenue(aggregate, leg, { difficulty, loadFactor }) {
+export function legRevenue(aggregate, leg, { difficulty }) {
   if (leg.crowDistance_m == null) return null;
   const passengerRevenue = aggregate.passengerCapacity * paymentPerUnit(leg.crowDistance_m, aggregate.topSpeed_kmh, 1, difficulty);
   const cargoRevenue = aggregate.cargoCapacity * paymentPerUnit(leg.crowDistance_m, aggregate.topSpeed_kmh, 1.75, difficulty);
-  return loadFactor * (passengerRevenue + cargoRevenue);
+  return leg.loadFactor * (passengerRevenue + cargoRevenue);
 }
 
 /** Annual maintenance, assumed constantly-operating (no station/depot state modeling yet). */
@@ -48,22 +48,33 @@ export function annualMaintenance(aggregate) {
  * Returns null if any leg is missing its crow distance, or the train can't
  * move (no locomotives / power).
  */
-export function tripSummary(aggregate, route, { trackSpeedLimit_kmh, difficulty, loadFactor, yearBasis = "standard" }) {
+export function tripSummary(aggregate, route, { trackSpeedLimit_kmh, difficulty, yearBasis = "standard" }) {
   if (!aggregate || aggregate.power_kW === 0) return null;
+
+  const yearSeconds = yearBasis === "average" ? REAL_SECONDS_PER_GAME_YEAR_AVG : REAL_SECONDS_PER_GAME_YEAR;
+  const maintenanceRate = annualMaintenance(aggregate) / yearSeconds; // $ per second, constant regardless of leg
 
   const legs = [];
   for (const leg of route.legs) {
     const time_s = legTime(aggregate, leg, trackSpeedLimit_kmh);
-    const revenue = legRevenue(aggregate, leg, { difficulty, loadFactor });
+    const revenue = legRevenue(aggregate, leg, { difficulty });
     if (time_s == null || revenue == null) return null;
-    legs.push({ time_s, revenue, distance_m: effectiveTrackDistance(leg), crowDistance_m: leg.crowDistance_m });
+    const distance_m = effectiveTrackDistance(leg);
+    const maintenance = maintenanceRate * time_s;
+    legs.push({
+      time_s,
+      distance_m,
+      crowDistance_m: leg.crowDistance_m,
+      avgSpeed_kmh: time_s > 0 ? (distance_m / time_s) * 3.6 : 0,
+      revenue,
+      maintenance,
+      profit: revenue - maintenance,
+    });
   }
 
   const totalTime_s = legs.reduce((sum, l) => sum + l.time_s, 0);
   const totalRevenue = legs.reduce((sum, l) => sum + l.revenue, 0);
-  const yearSeconds = yearBasis === "average" ? REAL_SECONDS_PER_GAME_YEAR_AVG : REAL_SECONDS_PER_GAME_YEAR;
-
-  const maintenanceForTrip = (annualMaintenance(aggregate) * totalTime_s) / yearSeconds;
+  const maintenanceForTrip = legs.reduce((sum, l) => sum + l.maintenance, 0);
   const profit = totalRevenue - maintenanceForTrip;
   const profitRatePerSecond = totalTime_s > 0 ? profit / totalTime_s : 0;
 

@@ -28,7 +28,7 @@ export function formatMoney(value) {
   return `$${new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)}`;
 }
 
-/** Compact one-line spec summary for a consist-list entry, e.g. "30t, $243,886, 40 km/h". */
+/** Compact one-line spec summary for a chip tooltip, e.g. "30t, $243,886, 40 km/h". */
 export function formatCompactSpec(vehicle) {
   const parts = [`${vehicle.mass_t}t`, formatMoney(vehicle.price), `${vehicle.topSpeed_kmh} km/h`];
   if (vehicle.kind === "locomotive") {

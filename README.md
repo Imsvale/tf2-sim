@@ -1,9 +1,11 @@
 # TF2 Sim
 
 A train performance and profit calculator for Transport Fever 2, with other
-vehicle types (e.g. aircraft) planned. Build two trains (locomotive(s) +
-wagons), compare their acceleration and performance graphs, lay out a
-multi-station route, and see per-leg and trip-total financials.
+vehicle types (e.g. aircraft) planned. Build any number of trains
+(locomotive(s) + wagons), compare their acceleration and performance
+graphs, lay out a multi-station route, and see per-leg and trip-total
+financials — across Trains / Graphs / Route / Financials tabs, with your
+setup saved to the browser automatically.
 
 Static site, no build step (a single vendored `vendor/chart.umd.min.js` for
 graphs is loaded via a plain `<script>` tag — no bundler involved). See

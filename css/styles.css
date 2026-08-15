@@ -8,6 +8,22 @@
   --accent-contrast: #ffffff;
   --row-alt: #f9fafb;
   --shadow: 0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.06);
+  --warning-bg: #fff4e5;
+  --warning-border: #f0b429;
+  --warning-text: #7a4a00;
+
+  /* Categorical chart palette — validated (dataviz skill), 8 fixed-order hues,
+     never cycled. Past 8 series, js/charts.js falls back to --series-other
+     rather than generating a 9th hue. See docs/ or the validator output. */
+  --series-1: #2a78d6; /* blue */
+  --series-2: #eb6834; /* orange */
+  --series-3: #1baf7a; /* aqua */
+  --series-4: #eda100; /* yellow */
+  --series-5: #e87ba4; /* magenta */
+  --series-6: #008300; /* green */
+  --series-7: #4a3aa7; /* violet */
+  --series-8: #e34948; /* red */
+  --series-other: #898781;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -21,6 +37,18 @@
     --accent-contrast: #0c1220;
     --row-alt: #20242c;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+    --warning-bg: #3a2c0f;
+    --warning-border: #c98500;
+    --warning-text: #f0b429;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --series-other: #898781;
   }
 }
 
@@ -34,6 +62,18 @@
   --accent-contrast: #0c1220;
   --row-alt: #20242c;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --warning-bg: #3a2c0f;
+  --warning-border: #c98500;
+  --warning-text: #f0b429;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --series-other: #898781;
 }
 
 * {
@@ -95,20 +135,76 @@ main {
   padding: 0 1.5rem 3rem;
 }
 
-main > section {
-  margin-top: 2.5rem;
-  padding-top: 2.5rem;
-  border-top: 1px solid var(--border);
-}
-
-main > section:first-child {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: none;
-}
-
-main > section h2 {
+.tab-panel h2 {
   margin-bottom: 0.25rem;
+}
+
+/* Tabs */
+
+.tab-bar {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0 0 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-btn {
+  padding: 0.6rem 1rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.tab-btn:hover {
+  color: var(--text);
+  border-bottom-color: var(--border);
+}
+
+.tab-btn[aria-selected="true"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* Warning banner */
+
+.warning-banner {
+  max-width: 1140px;
+  margin: 0 auto 1rem;
+  padding: 0.75rem 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--warning-bg);
+  border-bottom: 1px solid var(--warning-border);
+  color: var(--warning-text);
+  font-size: 0.9rem;
+}
+
+/* `display: flex` above otherwise beats the browser's default
+   `[hidden] { display: none }` rule (author styles win over the UA
+   stylesheet), so the banner would stay visible regardless of the
+   `hidden` attribute main.js toggles. */
+.warning-banner[hidden] {
+  display: none;
+}
+
+.warning-banner span {
+  flex: 1;
+}
+
+.warning-banner-dismiss {
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0.2rem 0.5rem;
+}
+
+.warning-banner-dismiss:hover {
+  border-color: transparent;
+  opacity: 0.7;
 }
 
 .hint {
@@ -152,83 +248,238 @@ button.primary {
 
 /* Train builder */
 
-.train-panels {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-  margin: 1.5rem 0;
+.train-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 1rem 0;
 }
 
-.train-panel {
+.train-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 1rem;
+  padding: 0.6rem 0.75rem;
   box-shadow: var(--shadow);
 }
 
-.train-panel h3 {
-  margin-top: 0;
-}
-
-.add-row {
+.train-strip-label-wrap {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.6rem;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  max-width: 12rem;
 }
 
-.add-row select {
+.train-strip-label {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.train-strip-rename {
+  flex-shrink: 0;
+  padding: 0.2rem 0.4rem;
+  line-height: 1;
+  color: var(--text-muted);
+  border-color: transparent;
+  background: transparent;
+}
+
+.train-strip-rename:hover {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--row-alt);
+}
+
+.train-strip-rename-input {
+  font-weight: 600;
+  min-width: 0;
+  width: 100%;
+}
+
+.train-strip-body {
   flex: 1;
   min-width: 0;
-}
-
-.add-wagon-qty {
-  width: 4.5rem;
-}
-
-.consist-list {
-  list-style: none;
-  margin: 0.75rem 0 0;
-  padding: 0;
-  border-top: 1px solid var(--border);
-}
-
-.consist-item {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.85rem;
+  overflow-x: auto;
+  padding: 0.2rem 0;
 }
 
-.consist-item-name {
-  flex: 1;
-  min-width: 0;
+.train-strip-chips {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
-.consist-item-name strong {
-  display: block;
-}
-
-.consist-item-name span {
-  color: var(--text-muted);
-  font-size: 0.8rem;
-}
-
-.consist-item-qty {
-  width: 3.5rem;
-}
-
-.consist-item-remove {
+.train-strip-clone,
+.train-strip-remove {
+  flex-shrink: 0;
   padding: 0.3rem 0.55rem;
   line-height: 1;
 }
 
-.consist-empty {
+.train-empty {
   color: var(--text-muted);
+  font-size: 0.9rem;
+  padding: 0.75rem;
+}
+
+.add-train-btn {
+  margin-top: 0.25rem;
+}
+
+/* Shown only when a category (locomotives or wagons) is empty — the
+   fallback way back in once there's no chip left to hang a + button on. */
+.add-category-fallback {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  border-style: dashed;
+}
+
+.add-category-fallback:hover {
+  color: var(--text);
+}
+
+/* Chips */
+
+.chip-wrap {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--row-alt);
+  color: var(--text);
   font-size: 0.85rem;
-  padding: 0.5rem 0;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--accent);
+}
+
+/* Small per-group insert (green +) / remove (red ✕) controls, stacked
+   vertically beside each chip. */
+.chip-mini-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.chip-mini-add,
+.chip-mini-remove {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chip-mini-add {
+  color: #2f9e44;
+  border-color: rgba(47, 158, 68, 0.4);
+}
+
+.chip-mini-add:hover {
+  background: rgba(47, 158, 68, 0.15);
+  border-color: #2f9e44;
+}
+
+.chip-mini-remove {
+  color: #e03131;
+  border-color: rgba(224, 49, 49, 0.4);
+}
+
+.chip-mini-remove:hover {
+  background: rgba(224, 49, 49, 0.15);
+  border-color: #e03131;
+}
+
+.chip-img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex-shrink: 0;
+  display: block;
+}
+
+/* A trailing locomotive faces the same way as a leading one (img/steam.png
+   etc. all face left by default) unless mirrored — see js/main.js's
+   isLastInTrain logic in buildTrainStrip. */
+.chip-img--flipped {
+  transform: scaleX(-1);
+}
+
+.chip-name {
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip-count {
+  color: var(--text-muted);
+}
+
+/* Popover — appended to document.body with position:fixed and positioned via
+   JS from the chip's bounding rect, so it isn't clipped by the strip's
+   overflow-x:auto (see js/main.js). */
+.popover {
+  position: fixed;
+  z-index: 100;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 0.75rem;
+  min-width: 14rem;
+  font-size: 0.85rem;
+}
+
+.popover-name {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.popover-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.popover-row label {
+  color: var(--text-muted);
+}
+
+.popover-row input {
+  width: 4.5rem;
+}
+
+.popover-row select {
+  flex: 1;
+  min-width: 0;
 }
 
 /* Charts */
@@ -241,6 +492,7 @@ button.primary {
 }
 
 .chart-card {
+  position: relative;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -254,11 +506,157 @@ button.primary {
 .chart-card h3 {
   margin: 0 0 0.5rem;
   font-size: 0.95rem;
+  padding-right: 1.75rem; /* keep the title clear of the maximize button */
 }
 
-.chart-card canvas {
+/* Chart.js's responsive sizing reads the canvas's own flex-resolved box —
+   handing it an ambiguous flex-item (flex:1 sharing a column with the h3)
+   let its internal notion of "canvas size" drift from the actual rendered
+   box, which showed up as a ~30px vertical offset in hover/tooltip
+   position. Wrapping in a plain, unambiguously-sized div and absolutely
+   filling it with the canvas removes that ambiguity — standard Chart.js
+   pattern for canvases inside flex/grid containers. */
+.chart-canvas-wrap {
+  position: relative;
   flex: 1;
   min-height: 0;
+}
+
+.chart-canvas-wrap canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.chart-maximize {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  line-height: 1;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.chart-maximize:hover {
+  color: var(--text);
+}
+
+/* Chart gallery (lightbox) */
+
+body.chart-gallery-open {
+  overflow: hidden;
+}
+
+.chart-gallery {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+/* Same reasoning as .warning-banner[hidden] above: `display: flex` on the
+   base rule otherwise beats the browser's default `[hidden]` rule, so the
+   modal would stay visible (and unclosable, since closing just re-sets the
+   attribute this rule was overriding) regardless of main.js's state. */
+.chart-gallery[hidden] {
+  display: none;
+}
+
+.chart-gallery-panel {
+  width: 90vw;
+  height: 85vh;
+  max-width: 1400px;
+  background: var(--bg-elevated);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 1.25rem;
+}
+
+/* When the panel itself goes browser-fullscreen (separate from just being
+   "maximized" in-page above), it should fill the real screen, no rounding/
+   backdrop needed — the backdrop's dimming still shows through outside a
+   fullscreen element on some browsers, so hide it explicitly too. */
+.chart-gallery-panel:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  border-radius: 0;
+  padding: 1.5rem 2rem;
+}
+.chart-gallery.is-fullscreen {
+  background: transparent;
+  padding: 0;
+}
+
+.chart-gallery-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.chart-gallery-title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.chart-gallery-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.chart-gallery-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  /* stretch (not center): the nav buttons are absolutely positioned (out of
+     flow), so .chart-canvas-wrap is the only in-flow child — it needs the
+     full height here, or its absolutely-positioned canvas has nothing to
+     size against. */
+  align-items: stretch;
+}
+
+.chart-gallery-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  font-size: 1.3rem;
+  line-height: 1;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+
+.chart-gallery-nav-prev {
+  left: -0.25rem;
+}
+
+.chart-gallery-nav-next {
+  right: -0.25rem;
+}
+
+.chart-gallery-hint {
+  margin: 0.75rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  text-align: center;
 }
 
 /* Route */
@@ -276,85 +674,48 @@ button.primary {
   color: var(--text-muted);
 }
 
-#load-factor-input {
+#route-table input[type="text"] {
+  width: 100%;
+  min-width: 8rem;
+}
+
+#route-table td:nth-child(2) input[type="number"],
+#route-table td:nth-child(4) input[type="number"] {
   width: 4.5rem;
 }
 
-.station-group,
-.leg-group {
-  margin-top: 1rem;
-}
-
-.station-group h3,
-.leg-group h3 {
-  font-size: 0.95rem;
-  margin-bottom: 0.5rem;
-}
-
-.station-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-
-.station-row input[type="text"] {
-  flex: 1;
-  max-width: 20rem;
-}
-
-.leg-card {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 1rem;
-  box-shadow: var(--shadow);
-  margin-bottom: 0.75rem;
-}
-
-.leg-title {
-  font-weight: 600;
-  margin-bottom: 0.6rem;
-}
-
-.leg-field {
+.route-track-cell {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
-.leg-field label {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  min-width: 11rem;
+.route-track-cell input[type="number"] {
+  width: 4.5rem;
 }
 
-.leg-helper {
-  margin-top: 0.5rem;
-  font-size: 0.85rem;
-}
-
-.leg-helper summary {
-  cursor: pointer;
-  color: var(--accent);
-}
-
-.leg-helper-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  margin-top: 0.5rem;
+.route-estimate-btn {
+  flex-shrink: 0;
+  padding: 0.2rem 0.5rem;
 }
 
 .leg-helper-result {
   color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-top: 0.4rem;
 }
 
 #add-station-btn {
   margin-top: 0.5rem;
+}
+
+.finance-group {
+  margin-top: 1.5rem;
+}
+
+.finance-group h3 {
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
 }
 
 .table-wrap {
@@ -401,6 +762,17 @@ button.primary {
   white-space: nowrap;
 }
 
+/* Dashed-underline info tooltip on a row-header word/phrase — see
+   js/main.js's buildFieldHeaderCell and js/train.js's TRAIN_SPEC_FIELDS
+   labelParts. Not link-colored: it's not clickable/navigable, just a
+   hover/tap target for the native `title` tooltip, so it stays in the
+   surrounding text color rather than implying it goes somewhere. */
+.info-tooltip {
+  text-decoration: underline dashed;
+  text-underline-offset: 2px;
+  cursor: help;
+}
+
 #acceleration-section {
   margin-top: 2rem;
 }
@@ -422,8 +794,38 @@ button.primary {
 }
 
 @media (max-width: 700px) {
-  .train-panels,
   .chart-grid {
     grid-template-columns: 1fr;
+  }
+
+  .train-strip {
+    flex-wrap: wrap;
+  }
+
+  .train-strip-body {
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .tab-bar {
+    overflow-x: auto;
+  }
+
+  .chart-gallery {
+    padding: 0.5rem;
+  }
+
+  .chart-gallery-panel {
+    width: 100%;
+    height: 100%;
+    padding: 0.75rem;
+  }
+
+  .chart-gallery-nav-prev {
+    left: 0.25rem;
+  }
+
+  .chart-gallery-nav-next {
+    right: 0.25rem;
   }
 }
