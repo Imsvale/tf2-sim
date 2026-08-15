@@ -1,0 +1,41 @@
+[
+  {
+    "id": "placeholder-loco-a",
+    "name": "Placeholder Locomotive A",
+    "category": "Locomotive",
+    "length_m": 19.5,
+    "weight_t": 84,
+    "maxSpeed_kmh": 140,
+    "power_kW": 3200,
+    "tractiveEffort_kN": 275,
+    "purchaseCost": 620000,
+    "capacity": 0,
+    "capacityUnit": "n/a"
+  },
+  {
+    "id": "placeholder-loco-b",
+    "name": "Placeholder Locomotive B",
+    "category": "Locomotive",
+    "length_m": 22.1,
+    "weight_t": 96,
+    "maxSpeed_kmh": 200,
+    "power_kW": 5600,
+    "tractiveEffort_kN": 310,
+    "purchaseCost": 1450000,
+    "capacity": 0,
+    "capacityUnit": "n/a"
+  },
+  {
+    "id": "placeholder-emu-a",
+    "name": "Placeholder EMU A",
+    "category": "EMU",
+    "length_m": 105,
+    "weight_t": 210,
+    "maxSpeed_kmh": 160,
+    "power_kW": 4000,
+    "tractiveEffort_kN": 180,
+    "purchaseCost": 3900000,
+    "capacity": 480,
+    "capacityUnit": "passengers"
+  }
+]

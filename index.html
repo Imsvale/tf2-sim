@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TF2 Sim</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <h1>TF2 Sim</h1>
+    <p class="tagline">Vehicle performance &amp; profit calculator for Transport Fever 2</p>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle light/dark theme">
+      <span class="theme-toggle-icon" aria-hidden="true">🌙</span>
+    </button>
+  </header>
+
+  <main>
+    <section class="compare-section" aria-labelledby="compare-heading">
+      <h2 id="compare-heading">Compare Vehicles</h2>
+      <p class="hint">Pick up to two vehicles to compare their specs side by side. (Data shown is placeholder — real vehicle data and derived stats are coming.)</p>
+
+      <div class="slot-row">
+        <div class="vehicle-slot" data-slot="0">
+          <label for="vehicle-select-0">Vehicle 1</label>
+          <select id="vehicle-select-0" class="vehicle-select"></select>
+        </div>
+        <div class="vehicle-slot" data-slot="1">
+          <label for="vehicle-select-1">Vehicle 2</label>
+          <select id="vehicle-select-1" class="vehicle-select"></select>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table id="compare-table" class="compare-table">
+          <thead>
+            <tr id="compare-table-head"></tr>
+          </thead>
+          <tbody id="compare-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>Skeleton build &mdash; see <a href="TODO.md">TODO.md</a> for the feature roadmap.</p>
+  </footer>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
