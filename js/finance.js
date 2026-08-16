@@ -16,6 +16,12 @@ const MILLIS_PER_DAY = 2000;
 const REAL_SECONDS_PER_GAME_YEAR = 730; // 2s/game-day * 365 days; see docs/revenue_formulas.md
 const REAL_SECONDS_PER_GAME_YEAR_AVG = 730.5; // using 365.25-day average
 
+// Maintenance rate while stopped at a station (loading/unloading), as a
+// fraction of the normal running rate. Shared by tripSummary and
+// breakEvenAverageSpeedForRoute_kmh so both model a stop's cost the same
+// way.
+const STOPPED_MAINTENANCE_FACTOR = 0.4;
+
 function basePriceRail(topSpeed_kmh) {
   return Math.pow(topSpeed_kmh, 0.86) + 10;
 }
@@ -71,6 +77,47 @@ export function breakEvenAverageSpeed_kmh(aggregate, leg, { difficulty, yearBasi
   if (maintenanceRate <= 0) return null;
   const breakEvenTime_s = revenue / maintenanceRate;
   return (leg.crowDistance_m / breakEvenTime_s) * 3.6;
+}
+
+/**
+ * The whole-loop analog of breakEvenAverageSpeed_kmh: the single flat
+ * average crow-flies speed (crow distance summed over every leg / total
+ * wall-clock time for the whole loop, dwell included) this train needs to
+ * sustain for total revenue to exactly match total maintenance across the
+ * entire route — see js/charts.js's renderRouteProfileChartsForRoute.
+ *
+ * This is well-defined as one flat number, the same way the per-leg
+ * version is, even though the route now includes station dwell: each
+ * station's hold time (js/loading.js's stationHoldTime) depends only on
+ * load factor and the wagons' own loading speed, never on how fast the
+ * train runs between stations — so total dwell time D, and what it costs
+ * at STOPPED_MAINTENANCE_FACTOR, are both fixed regardless of the travel
+ * time being solved for. Concretely: totalRevenue = maintenanceRate *
+ * (T_travel + STOPPED_MAINTENANCE_FACTOR * D), solved for T_travel, then
+ * T_total = T_travel + D. Null under the same conditions as
+ * breakEvenAverageSpeed_kmh (any leg missing crow distance, no revenue, or
+ * free maintenance).
+ */
+export function breakEvenAverageSpeedForRoute_kmh(aggregate, route, { difficulty, yearBasis = "standard" }) {
+  let totalCrowDistance_m = 0;
+  let totalRevenue = 0;
+  let totalDwell_s = 0;
+  for (const leg of route.legs) {
+    if (leg.crowDistance_m == null || leg.crowDistance_m <= 0) return null;
+    const revenue = legRevenue(aggregate, leg, { difficulty });
+    if (revenue == null) return null;
+    totalCrowDistance_m += leg.crowDistance_m;
+    totalRevenue += revenue;
+    totalDwell_s += stationHoldTime(aggregate, leg.loadFactor).holdTime_s;
+  }
+  if (totalRevenue <= 0) return null;
+  const maintenanceRate = annualMaintenance(aggregate) / yearSecondsFor(yearBasis);
+  if (maintenanceRate <= 0) return null;
+
+  const travelTime_s = totalRevenue / maintenanceRate - STOPPED_MAINTENANCE_FACTOR * totalDwell_s;
+  const totalTime_s = travelTime_s + totalDwell_s;
+  if (totalTime_s <= 0) return null;
+  return (totalCrowDistance_m / totalTime_s) * 3.6;
 }
 
 // The "K" from docs/breakeven_formulas.md: revenue's per-meter rate once
@@ -218,7 +265,6 @@ export function tripSummary(
 
   const yearSeconds = yearSecondsFor(yearBasis);
   const maintenanceRate = annualMaintenance(aggregate) / yearSeconds; // $ per second, constant regardless of leg
-  const STOPPED_MAINTENANCE_FACTOR = 0.4;
 
   const legs = [];
   for (const leg of route.legs) {

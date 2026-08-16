@@ -2,7 +2,7 @@ import { forceAtSpeed, accelerationAtSpeed, simulate, simulateToStop } from "./p
 import { stationHoldTime } from "./loading.js";
 import { effectiveTrackDistance } from "./route.js";
 import { formatMoneyCompact } from "./vehicles.js";
-import { breakEvenAverageSpeed_kmh } from "./finance.js";
+import { breakEvenAverageSpeed_kmh, breakEvenAverageSpeedForRoute_kmh } from "./finance.js";
 
 // Chart.js and its zoom plugin are loaded globally via plain <script> tags
 // (vendor/chart.umd.min.js, vendor/chartjs-plugin-zoom.umd.min.js) before
@@ -61,13 +61,14 @@ export function seriesColor(slot) {
   return themeColors().seriesColor(slot);
 }
 
-// Four chart groups today: the 4 Physics line charts, the 5 Finance bar
-// charts (see LEG_CHART_METRICS below), the 2 Route leg-profile charts
-// (see renderRouteProfileCharts), and the single whole-route chart (see
-// renderWholeRouteChart). js/chartGallery.js's prev/next navigation stays
-// confined to whichever group it was opened from — see chartGroupOf().
-// routeWhole is a single-chart group; prev/next within it is a harmless
-// no-op (wraps to itself).
+// Three chart groups today: the 4 Physics line charts, the 5 Finance bar
+// charts (see LEG_CHART_METRICS below), and the 9 Route profile charts
+// (see renderRouteProfileCharts / renderRouteProfileChartsForRoute) — the
+// same 9 canvases show either one leg's profile or the whole route's,
+// depending on the Route tab's Leg selector (js/main.js's
+// state.selectedLegIndex; -1 = "All"). js/chartGallery.js's prev/next
+// navigation stays confined to whichever group it was opened from — see
+// chartGroupOf().
 export const CHART_GROUPS = {
   physics: ["chart-force", "chart-acceleration", "chart-speed", "chart-distance", "chart-speed-distance"],
   finance: ["chart-leg-time", "chart-leg-speed", "chart-leg-revenue", "chart-leg-maintenance", "chart-leg-profit"],
@@ -82,13 +83,18 @@ export const CHART_GROUPS = {
     "chart-route-speed-crow",
     "chart-route-avgspeed-crow",
   ],
-  routeWhole: ["chart-route-whole"],
 };
 
 export function chartGroupOf(chartId) {
   return Object.keys(CHART_GROUPS).find((group) => CHART_GROUPS[group].includes(chartId)) ?? null;
 }
 
+// The 9 route-chart titles depend on the Leg selector's mode (one leg vs.
+// "All"), so these aren't fixed like every other entry — both
+// renderRouteProfileCharts and renderRouteProfileChartsForRoute overwrite
+// their own 9 entries every render with the current mode's wording; the
+// object itself (not a fresh one) is what js/chartGallery.js imports and
+// reads live from at open-time.
 export const CHART_TITLES = {
   "chart-force": "Force vs. Speed",
   "chart-acceleration": "Acceleration vs. Speed",
@@ -109,8 +115,27 @@ export const CHART_TITLES = {
   "chart-route-avgspeed-track": "Leg Profile — Track Distance — Average Speed",
   "chart-route-speed-crow": "Leg Profile — Crow-flies Distance — Speed",
   "chart-route-avgspeed-crow": "Leg Profile — Crow-flies Distance — Average Speed",
-  "chart-route-whole": "Whole Route — Speed over Time",
 };
+
+// Regenerated for both modes by setRouteChartTitles() below — the fixed
+// "what this chart shows" suffix, keyed the same as CHART_TITLES.
+const ROUTE_CHART_TITLE_SUFFIXES = {
+  "chart-route-speed-time": "Time — Speed",
+  "chart-route-accel-time": "Time — Acceleration",
+  "chart-route-distance-track-time": "Time — Distance (Track)",
+  "chart-route-distance-crow-time": "Time — Distance (Crow-flies)",
+  "chart-route-avgspeed-time": "Time — Average Speed (Crow-flies)",
+  "chart-route-speed-track": "Track Distance — Speed",
+  "chart-route-avgspeed-track": "Track Distance — Average Speed",
+  "chart-route-speed-crow": "Crow-flies Distance — Speed",
+  "chart-route-avgspeed-crow": "Crow-flies Distance — Average Speed",
+};
+
+function setRouteChartTitles(prefix) {
+  for (const [id, suffix] of Object.entries(ROUTE_CHART_TITLE_SUFFIXES)) {
+    CHART_TITLES[id] = `${prefix} — ${suffix}`;
+  }
+}
 
 const LEG_CHART_METRICS = [
   { id: "chart-leg-time", yLabel: "Time (s)", key: "time_s" },
@@ -499,33 +524,83 @@ export function renderFinanceCharts(trains, legLabels) {
   }
 }
 
-// Walks a train's full (run+brake) sample set looking for the first point
-// where its crow-flies average speed reaches breakEven_kmh, interpolating
-// between the two straddling samples for a precise crossing rather than
-// snapping to the nearest one. Returns null if the leg never gets there.
-// Used to mark that exact spot on the two *instantaneous*-speed charts
-// (Track/Crow-flies Distance sections) — the point of interest there being
-// that the instantaneous speed at that moment is well above breakEven_kmh
-// itself (the average necessarily lags behind while still climbing).
-function findBreakEvenCrossing(samples, crowScale, breakEven_kmh) {
+// Walks a chronologically-ordered, already offset sample set (see
+// simulateLegPoints below — {t, trackD, crowD, v_kmh}, run+brake only, no
+// dwell) looking for the first point where its crow-flies average speed
+// (crowD/t) reaches breakEven_kmh, interpolating between the two
+// straddling samples for a precise crossing rather than snapping to the
+// nearest one. Returns null if it never gets there. Used to mark that
+// exact spot on the two *instantaneous*-speed charts (Track/Crow-flies
+// Distance sections) — the point of interest there being that the
+// instantaneous speed at that moment is well above breakEven_kmh itself
+// (the average necessarily lags behind while still climbing). Works
+// identically for one leg's samples or every leg's concatenated in route
+// order — it's the offsets already baked into each sample that make that
+// possible.
+function findBreakEvenCrossing(samples, breakEven_kmh) {
   let prev = null;
   for (const s of samples) {
-    const crowAvg = s.t > 0 ? (s.d_m / s.t) * 3.6 * crowScale : 0;
+    const crowAvg = s.t > 0 ? (s.crowD / s.t) * 3.6 : 0;
     if (prev && prev.crowAvg < breakEven_kmh && crowAvg >= breakEven_kmh) {
       const frac = (breakEven_kmh - prev.crowAvg) / (crowAvg - prev.crowAvg);
-      const d_m = prev.s.d_m + frac * (s.d_m - prev.s.d_m);
+      const trackD = prev.s.trackD + frac * (s.trackD - prev.s.trackD);
+      const crowD = prev.s.crowD + frac * (s.crowD - prev.s.crowD);
       const v_kmh = prev.s.v_kmh + frac * (s.v_kmh - prev.s.v_kmh);
-      return { d_m, v_kmh, crowD_m: d_m * crowScale };
+      return { trackD, crowD, v_kmh };
     }
     prev = { s, crowAvg };
   }
   return null;
 }
 
+// One leg's simulated profile (accelerate/cruise, then brake to a stop —
+// js/physics.js's simulateToStop()), with every sample offset by whatever
+// cumulative time/track-distance/crow-distance came before it. Shared by
+// renderRouteProfileCharts (a single leg, offsets all zero) and
+// renderRouteProfileChartsForRoute (every leg in the loop, offsets
+// threaded leg to leg) so the physics and the run/brake segmentation every
+// instantaneous-quantity chart draws live in exactly one place. Returns
+// null if the leg can't be simulated (no distance yet, or simulateToStop
+// itself warns).
+function simulateLegPoints(aggregate, leg, options, { t0, trackD0, crowD0 }) {
+  const distance_m = effectiveTrackDistance(leg);
+  if (distance_m == null) return null;
+  const hasCrow = leg.crowDistance_m != null && leg.crowDistance_m > 0;
+  const crowScale = hasCrow ? leg.crowDistance_m / distance_m : null;
+
+  const result = simulateToStop(aggregate, distance_m, { ...options, sample: true });
+  if (!result || result.warning) return null;
+
+  const runRaw = result.samples.filter((s) => s.phase === "run");
+  const brakeRaw = result.samples.filter((s) => s.phase === "brake");
+  // Include the last run sample as the brake segment's starting point too,
+  // so the dashed segment visually connects to the solid one with no gap.
+  const brakeWithJoinRaw = runRaw.length ? [runRaw[runRaw.length - 1], ...brakeRaw] : brakeRaw;
+
+  const withOffsets = (s) => ({
+    t: t0 + s.t,
+    trackD: trackD0 + s.d_m,
+    crowD: hasCrow ? crowD0 + s.d_m * crowScale : null,
+    v_kmh: s.v_kmh,
+    a_ms2: s.a_ms2,
+  });
+
+  return {
+    hasCrow,
+    run: runRaw.map(withOffsets),
+    brakeWithJoin: brakeWithJoinRaw.map(withOffsets),
+    all: result.samples.map(withOffsets),
+    endT: t0 + result.totalTime_s,
+    endTrackD: trackD0 + distance_m,
+    endCrowD: hasCrow ? crowD0 + leg.crowDistance_m : null,
+  };
+}
+
 /**
  * One selected leg's full door-to-door profile (accelerate/cruise, then
- * brake to a stop) for every train — js/physics.js's simulateToStop().
- * Renders 9 charts, grouped by "what's on the x-axis":
+ * brake to a stop) for every train — js/physics.js's simulateToStop(), via
+ * simulateLegPoints above. Renders 9 charts, grouped by "what's on the
+ * x-axis":
  *
  * - Time: Speed and Acceleration (both instantaneous), Distance — both
  *   flavors, track and crow-flies (see below) — and Average Speed, the
@@ -557,6 +632,10 @@ function findBreakEvenCrossing(samples, crowScale, breakEven_kmh) {
  * equal to it (only the average has caught up; the train itself is still
  * going faster).
  *
+ * See renderRouteProfileChartsForRoute below for the "All legs" sibling of
+ * this function — same 9 canvases, same per-leg physics, extended to the
+ * whole loop (including station dwell) instead of just one leg.
+ *
  * @param {Array<{aggregate: object, label: string, colorSlot: number}|null>} trains
  * @param {object} leg - the selected leg (js/route.js) — both its track
  *   distance (for the physics) and crow distance (for every crow-flies-
@@ -564,10 +643,7 @@ function findBreakEvenCrossing(samples, crowScale, breakEven_kmh) {
  * @param {{trackSpeedLimit_kmh: number|null, brakingDeceleration_ms2: number, difficulty: number}} options
  */
 export function renderRouteProfileCharts(trains, leg, options) {
-  const distance_m = effectiveTrackDistance(leg);
-  if (distance_m == null) return;
-  const hasCrow = leg.crowDistance_m != null && leg.crowDistance_m > 0;
-  const crowScale = hasCrow ? leg.crowDistance_m / distance_m : null;
+  setRouteChartTitles("Leg Profile");
 
   const speedTimeDatasets = [];
   const avgSpeedTimeDatasets = [];
@@ -582,31 +658,25 @@ export function renderRouteProfileCharts(trains, leg, options) {
   trains.forEach((train, arrayIndex) => {
     if (!train) return;
     const seriesIndex = train.colorSlot ?? arrayIndex;
-    const result = simulateToStop(train.aggregate, distance_m, { ...options, sample: true });
-    if (!result || result.warning) return;
+    const L = simulateLegPoints(train.aggregate, leg, options, { t0: 0, trackD0: 0, crowD0: 0 });
+    if (!L) return;
 
-    const runSamples = result.samples.filter((s) => s.phase === "run");
-    const brakeSamples = result.samples.filter((s) => s.phase === "brake");
-    // Include the last run sample as the brake segment's starting point too,
-    // so the dashed segment visually connects to the solid one with no gap.
-    const brakeWithJoin = runSamples.length ? [runSamples[runSamples.length - 1], ...brakeSamples] : brakeSamples;
-
-    speedTimeDatasets.push({ label: train.label, seriesIndex, points: runSamples.map((s) => ({ x: s.t, y: s.v_kmh })) });
-    speedTimeDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: brakeWithJoin.map((s) => ({ x: s.t, y: s.v_kmh })) });
+    speedTimeDatasets.push({ label: train.label, seriesIndex, points: L.run.map((s) => ({ x: s.t, y: s.v_kmh })) });
+    speedTimeDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: L.brakeWithJoin.map((s) => ({ x: s.t, y: s.v_kmh })) });
 
     // Distance (track) and acceleration vs time — real physical quantities
     // (no crow-flies scaling), so unlike Average Speed above these don't
     // need to wait on hasCrow. Same run/brake split as Speed vs Time, for
     // the same reason: shows at a glance where braking starts, even though
     // distance itself has no visible kink there (only a slope change).
-    distanceTrackTimeDatasets.push({ label: train.label, seriesIndex, points: runSamples.map((s) => ({ x: s.t, y: s.d_m })) });
-    distanceTrackTimeDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: brakeWithJoin.map((s) => ({ x: s.t, y: s.d_m })) });
+    distanceTrackTimeDatasets.push({ label: train.label, seriesIndex, points: L.run.map((s) => ({ x: s.t, y: s.trackD })) });
+    distanceTrackTimeDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: L.brakeWithJoin.map((s) => ({ x: s.t, y: s.trackD })) });
 
-    accelTimeDatasets.push({ label: train.label, seriesIndex, points: runSamples.map((s) => ({ x: s.t, y: s.a_ms2 })) });
-    accelTimeDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: brakeWithJoin.map((s) => ({ x: s.t, y: s.a_ms2 })) });
+    accelTimeDatasets.push({ label: train.label, seriesIndex, points: L.run.map((s) => ({ x: s.t, y: s.a_ms2 })) });
+    accelTimeDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: L.brakeWithJoin.map((s) => ({ x: s.t, y: s.a_ms2 })) });
 
-    speedTrackDatasets.push({ label: train.label, seriesIndex, points: runSamples.map((s) => ({ x: s.d_m, y: s.v_kmh })) });
-    speedTrackDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: brakeWithJoin.map((s) => ({ x: s.d_m, y: s.v_kmh })) });
+    speedTrackDatasets.push({ label: train.label, seriesIndex, points: L.run.map((s) => ({ x: s.trackD, y: s.v_kmh })) });
+    speedTrackDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: L.brakeWithJoin.map((s) => ({ x: s.trackD, y: s.v_kmh })) });
 
     // Track-distance average speed so far = cumulative distance /
     // cumulative time — one continuous curve over the *full* sample set
@@ -616,27 +686,27 @@ export function renderRouteProfileCharts(trains, leg, options) {
     // to draw. t=0's 0/0 is defined as 0, matching the limit as t->0 (the
     // train starts from rest, so the average approaches the same 0 the
     // instantaneous curve starts at — no discontinuity).
-    const avgSpeedKmh = (s) => (s.t > 0 ? (s.d_m / s.t) * 3.6 : 0);
-    avgSpeedTrackDatasets.push({ label: train.label, seriesIndex, points: result.samples.map((s) => ({ x: s.d_m, y: avgSpeedKmh(s) })) });
+    const trackAvgKmh = (s) => (s.t > 0 ? (s.trackD / s.t) * 3.6 : 0);
+    avgSpeedTrackDatasets.push({ label: train.label, seriesIndex, points: L.all.map((s) => ({ x: s.trackD, y: trackAvgKmh(s) })) });
 
-    if (!hasCrow) return;
+    if (!L.hasCrow) return;
 
     // Crow-flies distance so far and crow-flies average speed so far — see
     // this function's own doc comment above for what these do and don't
     // mean physically. Speed vs Crow-flies Distance reuses the exact same
     // v_kmh samples as Speed vs Track Distance, just against the rescaled
     // x — it's real instantaneous speed, only the x-axis is virtual.
-    speedCrowDatasets.push({ label: train.label, seriesIndex, points: runSamples.map((s) => ({ x: s.d_m * crowScale, y: s.v_kmh })) });
-    speedCrowDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: brakeWithJoin.map((s) => ({ x: s.d_m * crowScale, y: s.v_kmh })) });
+    speedCrowDatasets.push({ label: train.label, seriesIndex, points: L.run.map((s) => ({ x: s.crowD, y: s.v_kmh })) });
+    speedCrowDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: L.brakeWithJoin.map((s) => ({ x: s.crowD, y: s.v_kmh })) });
 
-    avgSpeedTimeDatasets.push({ label: train.label, seriesIndex, points: result.samples.map((s) => ({ x: s.t, y: avgSpeedKmh(s) * crowScale })) });
-    avgSpeedCrowDatasets.push({ label: train.label, seriesIndex, points: result.samples.map((s) => ({ x: s.d_m * crowScale, y: avgSpeedKmh(s) * crowScale })) });
+    const crowAvgKmh = (s) => (s.t > 0 ? (s.crowD / s.t) * 3.6 : 0);
+    avgSpeedTimeDatasets.push({ label: train.label, seriesIndex, points: L.all.map((s) => ({ x: s.t, y: crowAvgKmh(s) })) });
+    avgSpeedCrowDatasets.push({ label: train.label, seriesIndex, points: L.all.map((s) => ({ x: s.crowD, y: crowAvgKmh(s) })) });
 
     // Distance (crow-flies) vs time — the same virtual scaling as
-    // everything else crow-flies-denominated in this function; d_m*crowScale
-    // lands on the leg's true crow distance at the end, same as elsewhere.
-    distanceCrowTimeDatasets.push({ label: train.label, seriesIndex, points: runSamples.map((s) => ({ x: s.t, y: s.d_m * crowScale })) });
-    distanceCrowTimeDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: brakeWithJoin.map((s) => ({ x: s.t, y: s.d_m * crowScale })) });
+    // everything else crow-flies-denominated in this function.
+    distanceCrowTimeDatasets.push({ label: train.label, seriesIndex, points: L.run.map((s) => ({ x: s.t, y: s.crowD })) });
+    distanceCrowTimeDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: L.brakeWithJoin.map((s) => ({ x: s.t, y: s.crowD })) });
 
     const breakEven_kmh = breakEvenAverageSpeed_kmh(train.aggregate, leg, options);
     if (breakEven_kmh == null) return;
@@ -650,7 +720,7 @@ export function renderRouteProfileCharts(trains, leg, options) {
       legendHidden: true,
       points: [
         { x: 0, y: breakEven_kmh },
-        { x: result.totalTime_s, y: breakEven_kmh },
+        { x: L.endT, y: breakEven_kmh },
       ],
     });
     avgSpeedCrowDatasets.push({
@@ -659,14 +729,14 @@ export function renderRouteProfileCharts(trains, leg, options) {
       legendHidden: true,
       points: [
         { x: 0, y: breakEven_kmh },
-        { x: leg.crowDistance_m, y: breakEven_kmh },
+        { x: L.endCrowD, y: breakEven_kmh },
       ],
     });
 
-    const crossing = findBreakEvenCrossing(result.samples, crowScale, breakEven_kmh);
+    const crossing = findBreakEvenCrossing(L.all, breakEven_kmh);
     if (crossing) {
-      speedTrackDatasets.push({ seriesIndex, legendHidden: true, pointRadius: 6, points: [{ x: crossing.d_m, y: crossing.v_kmh }] });
-      speedCrowDatasets.push({ seriesIndex, legendHidden: true, pointRadius: 6, points: [{ x: crossing.crowD_m, y: crossing.v_kmh }] });
+      speedTrackDatasets.push({ seriesIndex, legendHidden: true, pointRadius: 6, points: [{ x: crossing.trackD, y: crossing.v_kmh }] });
+      speedCrowDatasets.push({ seriesIndex, legendHidden: true, pointRadius: 6, points: [{ x: crossing.crowD, y: crossing.v_kmh }] });
     }
   });
 
@@ -682,44 +752,188 @@ export function renderRouteProfileCharts(trains, leg, options) {
 }
 
 /**
- * The entire loop, every leg back to back, for every train: accelerate,
- * cruise, brake to a stop (simulateToStop, same as renderRouteProfileCharts)
- * then a flat "stopped" segment for that station's loading+unloading dwell
- * (js/loading.js's stationHoldTime, using that leg's own load factor — see
- * js/finance.js's tripSummary() for why the leg's own factor governs both
- * ends of its own load), before the next leg's samples continue from the
- * cumulative time so far. One continuous line per train.
+ * The "All" mode of the same 9 charts (js/main.js's Leg selector, "All" at
+ * index -1): every leg of the loop back to back, for every train, via
+ * simulateLegPoints — same per-leg physics as renderRouteProfileCharts,
+ * just threaded leg to leg with running time/track-distance/crow-distance
+ * offsets — with each station's loading/unloading dwell (js/loading.js's
+ * stationHoldTime, that leg's own load factor — see js/finance.js's
+ * tripSummary() for why the leg's own factor governs both ends of its own
+ * load) spliced in between as a flat segment before the next leg
+ * continues. A train that fails to simulate any single leg is skipped
+ * entirely (no partial loop rendered).
+ *
+ * Differences from the single-leg version, all a direct consequence of the
+ * loop now spending real elapsed time standing at stations:
+ * - The four Time-axis instantaneous charts (Speed/Acceleration/Distance
+ *   x2) get an extra flat "dwell" segment per leg, holding at whatever
+ *   value was reached when braking finished (0 for speed/acceleration, the
+ *   leg's own end distance for the two Distance charts) — the visual cost
+ *   of standing still. The two Distance-axis charts (Track/Crow-flies
+ *   Distance sections) don't need one: distance can't move while stopped,
+ *   so a stop there is just where one leg's line picks up exactly where
+ *   the last one left off.
+ * - Average Speed is one continuous curve across the *whole* loop (crow
+ *   distance covered anywhere in the loop so far / wall-clock time elapsed
+ *   anywhere in the loop so far, dwell included) rather than resetting
+ *   each leg — this is the number that actually says whether the loop as
+ *   a whole is ahead of or behind break-even at any given moment. Two
+ *   bookend points are added at each dwell's start and end so the drop
+ *   while parked (distance frozen, time still advancing) shows up
+ *   explicitly; the true decay in between is a curve (1/t), but a straight
+ *   line between the two bookends is a reasonable stand-in given dwell
+ *   time is typically much shorter than travel time.
+ * - The break-even reference line is one flat threshold for the *entire*
+ *   route (js/finance.js's breakEvenAverageSpeedForRoute_kmh) rather than
+ *   a leg-specific one — see that function's own doc comment for why a
+ *   single flat number is still exactly right even with dwell in the mix.
+ * - The break-even crossing marker is the *first* such crossing anywhere
+ *   in the loop, searched across every leg's run+brake samples in route
+ *   order (dwell samples are excluded from that search — the average can
+ *   only fall during a stop, never newly cross upward there).
  *
  * @param {Array<{aggregate: object, label: string, colorSlot: number}|null>} trains
  * @param {object} route - js/route.js route (stations/legs)
- * @param {{trackSpeedLimit_kmh: number|null, brakingDeceleration_ms2: number}} options
+ * @param {{trackSpeedLimit_kmh: number|null, brakingDeceleration_ms2: number, difficulty: number}} options
  */
-export function renderWholeRouteChart(trains, route, options) {
-  const datasets = [];
+export function renderRouteProfileChartsForRoute(trains, route, options) {
+  setRouteChartTitles("Whole Route");
+
+  const hasCrowForRoute = route.legs.every((leg) => leg.crowDistance_m != null && leg.crowDistance_m > 0);
+
+  const speedTimeDatasets = [];
+  const avgSpeedTimeDatasets = [];
+  const distanceTrackTimeDatasets = [];
+  const distanceCrowTimeDatasets = [];
+  const accelTimeDatasets = [];
+  const speedTrackDatasets = [];
+  const avgSpeedTrackDatasets = [];
+  const speedCrowDatasets = [];
+  const avgSpeedCrowDatasets = [];
 
   trains.forEach((train, arrayIndex) => {
     if (!train) return;
     const seriesIndex = train.colorSlot ?? arrayIndex;
-    const points = [];
-    let cumulativeT = 0;
 
+    // First pass: simulate every leg in order, threading cumulative
+    // offsets and each leg's dwell — bail on this train entirely if any
+    // leg fails, rather than rendering a partial loop.
+    const legPoints = [];
+    let t0 = 0, trackD0 = 0, crowD0 = 0;
+    let ok = true;
     for (const leg of route.legs) {
-      const distance_m = effectiveTrackDistance(leg);
-      if (distance_m == null) return;
-      const result = simulateToStop(train.aggregate, distance_m, { ...options, sample: true });
-      if (!result || result.warning) return;
-
-      result.samples.forEach((s) => points.push({ x: cumulativeT + s.t, y: s.v_kmh }));
-      cumulativeT += result.totalTime_s;
-
+      const L = simulateLegPoints(train.aggregate, leg, options, { t0, trackD0, crowD0 });
+      if (!L) { ok = false; break; }
       const hold = stationHoldTime(train.aggregate, leg.loadFactor);
-      points.push({ x: cumulativeT, y: 0 });
-      points.push({ x: cumulativeT + hold.holdTime_s, y: 0 });
-      cumulativeT += hold.holdTime_s;
+      const dwellEndT = L.endT + hold.holdTime_s;
+      legPoints.push({ L, dwellEndT });
+      t0 = dwellEndT;
+      trackD0 = L.endTrackD;
+      crowD0 = hasCrowForRoute ? L.endCrowD : 0;
     }
+    if (!ok) return;
 
-    datasets.push({ label: train.label, seriesIndex, points });
+    // Second pass: the loop simulated cleanly end to end — push every
+    // chart's datasets. t0/trackD0/crowD0 now hold the loop's grand totals
+    // (final leg's dwellEndT/endTrackD/endCrowD), reused below for the
+    // break-even reference line's far endpoint.
+    const trackAvgPoints = [];
+    const crowAvgTimePoints = [];
+    const crowAvgCrowPoints = [];
+    const crossingSearchSamples = [];
+
+    legPoints.forEach(({ L, dwellEndT }, legIndex) => {
+      const firstLeg = legIndex === 0;
+      const label = firstLeg ? train.label : undefined;
+      const legendHidden = !firstLeg;
+
+      speedTimeDatasets.push({ label, seriesIndex, legendHidden, points: L.run.map((s) => ({ x: s.t, y: s.v_kmh })) });
+      speedTimeDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: L.brakeWithJoin.map((s) => ({ x: s.t, y: s.v_kmh })) });
+
+      distanceTrackTimeDatasets.push({ label, seriesIndex, legendHidden, points: L.run.map((s) => ({ x: s.t, y: s.trackD })) });
+      distanceTrackTimeDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: L.brakeWithJoin.map((s) => ({ x: s.t, y: s.trackD })) });
+
+      accelTimeDatasets.push({ label, seriesIndex, legendHidden, points: L.run.map((s) => ({ x: s.t, y: s.a_ms2 })) });
+      accelTimeDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: L.brakeWithJoin.map((s) => ({ x: s.t, y: s.a_ms2 })) });
+
+      speedTrackDatasets.push({ label, seriesIndex, legendHidden, points: L.run.map((s) => ({ x: s.trackD, y: s.v_kmh })) });
+      speedTrackDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: L.brakeWithJoin.map((s) => ({ x: s.trackD, y: s.v_kmh })) });
+
+      trackAvgPoints.push(...L.all.map((s) => ({ x: s.trackD, y: s.t > 0 ? (s.trackD / s.t) * 3.6 : 0 })));
+
+      if (hasCrowForRoute) {
+        speedCrowDatasets.push({ label, seriesIndex, legendHidden, points: L.run.map((s) => ({ x: s.crowD, y: s.v_kmh })) });
+        speedCrowDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: L.brakeWithJoin.map((s) => ({ x: s.crowD, y: s.v_kmh })) });
+
+        distanceCrowTimeDatasets.push({ label, seriesIndex, legendHidden, points: L.run.map((s) => ({ x: s.t, y: s.crowD })) });
+        distanceCrowTimeDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: L.brakeWithJoin.map((s) => ({ x: s.t, y: s.crowD })) });
+
+        const crowAvgKmh = (s) => (s.t > 0 ? (s.crowD / s.t) * 3.6 : 0);
+        crowAvgTimePoints.push(...L.all.map((s) => ({ x: s.t, y: crowAvgKmh(s) })));
+        crowAvgCrowPoints.push(...L.all.map((s) => ({ x: s.crowD, y: crowAvgKmh(s) })));
+
+        crossingSearchSamples.push(...L.all);
+      }
+
+      // Dwell: flat for the four Time-axis instantaneous charts, holding
+      // at this leg's end value. Plus the average-speed bookends — see
+      // this function's doc comment for why 2 points per dwell here.
+      speedTimeDatasets.push({ seriesIndex, legendHidden: true, points: [{ x: L.endT, y: 0 }, { x: dwellEndT, y: 0 }] });
+      distanceTrackTimeDatasets.push({ seriesIndex, legendHidden: true, points: [{ x: L.endT, y: L.endTrackD }, { x: dwellEndT, y: L.endTrackD }] });
+      accelTimeDatasets.push({ seriesIndex, legendHidden: true, points: [{ x: L.endT, y: 0 }, { x: dwellEndT, y: 0 }] });
+      trackAvgPoints.push({ x: L.endTrackD, y: dwellEndT > 0 ? (L.endTrackD / dwellEndT) * 3.6 : 0 });
+      if (hasCrowForRoute) {
+        distanceCrowTimeDatasets.push({ seriesIndex, legendHidden: true, points: [{ x: L.endT, y: L.endCrowD }, { x: dwellEndT, y: L.endCrowD }] });
+        crowAvgTimePoints.push({ x: dwellEndT, y: dwellEndT > 0 ? (L.endCrowD / dwellEndT) * 3.6 : 0 });
+        crowAvgCrowPoints.push({ x: L.endCrowD, y: dwellEndT > 0 ? (L.endCrowD / dwellEndT) * 3.6 : 0 });
+      }
+    });
+
+    avgSpeedTrackDatasets.push({ label: train.label, seriesIndex, points: trackAvgPoints });
+    if (!hasCrowForRoute) return;
+
+    avgSpeedTimeDatasets.push({ label: train.label, seriesIndex, points: crowAvgTimePoints });
+    avgSpeedCrowDatasets.push({ label: train.label, seriesIndex, points: crowAvgCrowPoints });
+
+    const breakEven_kmh = breakEvenAverageSpeedForRoute_kmh(train.aggregate, route, options);
+    if (breakEven_kmh == null) return;
+
+    // Flat reference line at this train's own break-even speed for the
+    // *whole route* — spans the loop's grand-total time/crow-distance
+    // (t0/crowD0, left holding their final values by the loop above).
+    avgSpeedTimeDatasets.push({
+      seriesIndex,
+      dashed: true,
+      legendHidden: true,
+      points: [
+        { x: 0, y: breakEven_kmh },
+        { x: t0, y: breakEven_kmh },
+      ],
+    });
+    avgSpeedCrowDatasets.push({
+      seriesIndex,
+      dashed: true,
+      legendHidden: true,
+      points: [
+        { x: 0, y: breakEven_kmh },
+        { x: crowD0, y: breakEven_kmh },
+      ],
+    });
+
+    const crossing = findBreakEvenCrossing(crossingSearchSamples, breakEven_kmh);
+    if (crossing) {
+      speedTrackDatasets.push({ seriesIndex, legendHidden: true, pointRadius: 6, points: [{ x: crossing.trackD, y: crossing.v_kmh }] });
+      speedCrowDatasets.push({ seriesIndex, legendHidden: true, pointRadius: 6, points: [{ x: crossing.crowD, y: crossing.v_kmh }] });
+    }
   });
 
-  renderCardChart("chart-route-whole", { xLabel: "Time (s)", yLabel: "Speed (km/h)", datasets });
+  renderCardChart("chart-route-speed-time", { xLabel: "Time (s)", yLabel: "Speed (km/h)", datasets: speedTimeDatasets });
+  renderCardChart("chart-route-avgspeed-time", { xLabel: "Time (s)", yLabel: "Average speed (crow-flies, km/h)", datasets: avgSpeedTimeDatasets });
+  renderCardChart("chart-route-distance-track-time", { xLabel: "Time (s)", yLabel: "Distance (m)", datasets: distanceTrackTimeDatasets });
+  renderCardChart("chart-route-distance-crow-time", { xLabel: "Time (s)", yLabel: "Crow-flies distance (m)", datasets: distanceCrowTimeDatasets });
+  renderCardChart("chart-route-accel-time", { xLabel: "Time (s)", yLabel: "Acceleration (m/s²)", datasets: accelTimeDatasets });
+  renderCardChart("chart-route-speed-track", { xLabel: "Track distance (m)", yLabel: "Speed (km/h)", datasets: speedTrackDatasets });
+  renderCardChart("chart-route-avgspeed-track", { xLabel: "Track distance (m)", yLabel: "Average speed (km/h)", datasets: avgSpeedTrackDatasets });
+  renderCardChart("chart-route-speed-crow", { xLabel: "Crow-flies distance (m)", yLabel: "Speed (km/h)", datasets: speedCrowDatasets });
+  renderCardChart("chart-route-avgspeed-crow", { xLabel: "Crow-flies distance (m)", yLabel: "Average speed (crow-flies, km/h)", datasets: avgSpeedCrowDatasets });
 }

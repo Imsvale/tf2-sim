@@ -92,10 +92,11 @@ export function validateState(parsed, vehicleById) {
   if (typeof parsed.gravity_ms2 === "number" && parsed.gravity_ms2 > 0) {
     state.gravity_ms2 = parsed.gravity_ms2;
   }
-  // Out-of-range (e.g. that leg's station got removed) is self-healed by
-  // js/main.js's renderLegSelect(), which clamps it back to 0 on render —
-  // no need to cross-reference the reconstructed route's leg count here too.
-  if (Number.isInteger(parsed.selectedLegIndex) && parsed.selectedLegIndex >= 0) {
+  // -1 = "All" (whole route). Out-of-range (e.g. that leg's station got
+  // removed) is self-healed by js/main.js's renderLegSelect(), which
+  // clamps it back to -1 on render — no need to cross-reference the
+  // reconstructed route's leg count here too.
+  if (Number.isInteger(parsed.selectedLegIndex) && parsed.selectedLegIndex >= -1) {
     state.selectedLegIndex = parsed.selectedLegIndex;
   }
   if (["easy", "medium", "hard", "veryHard"].includes(parsed.difficultyKey)) {

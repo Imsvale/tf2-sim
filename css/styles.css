@@ -1077,8 +1077,8 @@ body.chart-gallery-open {
 }
 
 /* Direct-child combinator, not a plain descendant selector — this is meant
-   for the "Leg Profile"/"Whole Route" section headings only. A descendant
-   selector here would also match the <h3> nested inside each chart card's
+   for the "Route Profile" section heading only. A descendant selector here
+   would also match the <h3> nested inside each chart card's
    .chart-card-header (several levels deeper), and since an ID beats a
    class regardless of source order, it would win over that h3's own
    `margin: 0` — pushing the title down inside the header's flex row and
@@ -1088,7 +1088,7 @@ body.chart-gallery-open {
   margin: 2rem 0 0.5rem;
 }
 
-/* One level below the h3 section headings above ("Leg Profile") — groups
+/* One level below the h3 section heading above ("Route Profile") — groups
    the Time/Track Distance/Crow-flies Distance chart pairs within it. */
 .chart-subsection-heading {
   font-size: 0.85rem;

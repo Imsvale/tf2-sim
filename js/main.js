@@ -25,7 +25,7 @@ import {
   paybackPeriodRealHours,
   breakEvenWagonCount,
 } from "./finance.js";
-import { renderCharts, renderFinanceCharts, renderRouteProfileCharts, renderWholeRouteChart, SERIES_SLOTS, seriesColor } from "./charts.js";
+import { renderCharts, renderFinanceCharts, renderRouteProfileCharts, renderRouteProfileChartsForRoute, SERIES_SLOTS, seriesColor } from "./charts.js";
 import { initChartGallery } from "./chartGallery.js";
 import { saveState, loadState, validateState } from "./storage.js";
 import { decodeShareHash, buildShareUrl } from "./shareLink.js";
@@ -40,7 +40,7 @@ const state = {
   trackSpeedLimit_kmh: 300,
   brakingDeceleration_ms2: 2.5,
   gravity_ms2: 9.81,
-  selectedLegIndex: 0,
+  selectedLegIndex: -1, // -1 = "All" (whole route) — see renderLegSelect()
   difficultyKey: "easy",
   includeStopsInFinancials: false,
   accelerationDetail: "simple",
@@ -881,21 +881,38 @@ function initRouteControls() {
   });
 }
 
-// Rebuilds the leg <select>'s options from the current route (label via
-// legLabel(), so it always matches the route table's station names) and
-// clamps state.selectedLegIndex if the previously-selected leg no longer
-// exists (e.g. that station was removed). Called on every structural route
-// change (renderRoute) and on station rename, since legLabel() output
-// changes then too but nothing else currently triggers a rebuild for that.
+// Rebuilds the leg <select>'s options from the current route ("All" first
+// and default, then one per leg via legLabel() so it always matches the
+// route table's station names) and clamps state.selectedLegIndex back to
+// "All" if the previously-selected leg no longer exists (e.g. that station
+// was removed). Called on every structural route change (renderRoute) and
+// on station rename, since legLabel() output changes then too but nothing
+// else currently triggers a rebuild for that.
 function renderLegSelect() {
   const select = document.getElementById("route-leg-select");
   const legCount = state.route.legs.length;
-  if (state.selectedLegIndex >= legCount) state.selectedLegIndex = 0;
+  if (state.selectedLegIndex !== -1 && state.selectedLegIndex >= legCount) state.selectedLegIndex = -1;
 
   select.innerHTML = "";
+  select.appendChild(new Option("All", "-1", false, state.selectedLegIndex === -1));
   state.route.legs.forEach((_, i) => {
     select.appendChild(new Option(legLabel(i), String(i), false, i === state.selectedLegIndex));
   });
+}
+
+// The Route Profile section's two intro hints read differently depending
+// on whether a single leg or "All" (the whole route) is selected — see
+// js/charts.js's renderRouteProfileCharts vs renderRouteProfileChartsForRoute
+// for what actually changes. Called from recompute() so it stays in sync
+// with whichever chart set just rendered.
+function updateRouteProfileHints() {
+  const whole = state.selectedLegIndex === -1;
+  document.getElementById("route-profile-hint").textContent = whole
+    ? "Every train's full loop, leg after leg: accelerate, cruise if there's room, brake to a stop, then load/unload before the next leg. The dashed tail of each line is a braking phase; the flat stretches are time spent stopped at a station."
+    : "Each train's full run for the selected leg alone: accelerate, cruise if there's room, then brake to a stop at the station. The dashed tail of each line is the braking phase.";
+  document.getElementById("route-time-hint").textContent = whole
+    ? "Average speed here is crow-flies, accumulated over the whole loop (including time spent stopped) — the quantity that determines whether the route as a whole is profitable, since revenue is paid on crow-flies distance while maintenance is paid on time, however that time is spent. Each train's own break-even speed for the whole route is the dashed line; crossing it means the loop as a whole has turned a profit."
+    : "Average speed here is crow-flies — the quantity that determines whether this leg is profitable, since revenue is paid on crow-flies distance while maintenance is paid on time, however that time is spent. Each train's own break-even speed for this leg is the dashed line; crossing it means the leg has turned a profit.";
 }
 
 // "A → B" for leg i (stop[i] -> stop[(i+1) % n], wrapping for the last leg)
@@ -1399,20 +1416,19 @@ function recompute() {
     renderFinance(aggregates);
     renderCharts(aggregates, state.trackSpeedLimit_kmh, state.gravity_ms2);
 
-    const selectedLeg = state.route.legs[state.selectedLegIndex];
-    if (selectedLeg) {
-      renderRouteProfileCharts(aggregates, selectedLeg, {
-        trackSpeedLimit_kmh: state.trackSpeedLimit_kmh,
-        brakingDeceleration_ms2: state.brakingDeceleration_ms2,
-        difficulty: DIFFICULTY_FACTORS[state.difficultyKey],
-        gravity_ms2: state.gravity_ms2,
-      });
-    }
-    renderWholeRouteChart(aggregates, state.route, {
+    const routeProfileOptions = {
       trackSpeedLimit_kmh: state.trackSpeedLimit_kmh,
       brakingDeceleration_ms2: state.brakingDeceleration_ms2,
+      difficulty: DIFFICULTY_FACTORS[state.difficultyKey],
       gravity_ms2: state.gravity_ms2,
-    });
+    };
+    if (state.selectedLegIndex === -1) {
+      renderRouteProfileChartsForRoute(aggregates, state.route, routeProfileOptions);
+    } else {
+      const selectedLeg = state.route.legs[state.selectedLegIndex];
+      if (selectedLeg) renderRouteProfileCharts(aggregates, selectedLeg, routeProfileOptions);
+    }
+    updateRouteProfileHints();
     renderExperimentalTable(); // depends on state.difficultyKey, not on trains/route -- still cheap enough to just always refresh here
 
     saveState(state);

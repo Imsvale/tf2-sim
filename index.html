@@ -161,23 +161,15 @@
       </div>
       <button id="add-station-btn" type="button">Add station</button>
 
-      <h3>Leg Profile</h3>
+      <h3>Route Profile</h3>
       <div class="control-row">
         <label for="route-leg-select">Leg</label>
         <select id="route-leg-select"></select>
       </div>
-      <p class="hint">
-        Each train's full run for the selected leg alone: accelerate, cruise if there's room, then
-        brake to a stop at the station. The dashed tail of each line is the braking phase.
-      </p>
+      <p id="route-profile-hint" class="hint"></p>
 
       <h4 class="chart-subsection-heading">Time</h4>
-      <p class="hint">
-        Average speed here is <em>crow-flies</em> — the quantity that determines whether this leg is
-        profitable, since revenue is paid on crow-flies distance while maintenance is paid on time,
-        however that time is spent. Each train's own break-even speed for this leg is the dashed
-        line; crossing it means the leg has turned a profit.
-      </p>
+      <p id="route-time-hint" class="hint"></p>
       <div class="chart-grid">
         <div class="chart-card">
           <div class="chart-card-header">
@@ -259,21 +251,6 @@
             <button class="chart-maximize" type="button" data-chart-id="chart-route-avgspeed-crow" title="Maximize" aria-label="Maximize Average Speed vs Crow-flies Distance"></button>
           </div>
           <div class="chart-canvas-wrap"><canvas id="chart-route-avgspeed-crow"></canvas></div>
-        </div>
-      </div>
-
-      <h3>Whole Route</h3>
-      <p class="hint">
-        The entire loop, every leg back to back, including braking into each station and the
-        loading/unloading dwell there.
-      </p>
-      <div class="chart-grid">
-        <div class="chart-card">
-          <div class="chart-card-header">
-            <h3>Speed over Time</h3>
-            <button class="chart-maximize" type="button" data-chart-id="chart-route-whole" title="Maximize" aria-label="Maximize Speed over Time"></button>
-          </div>
-          <div class="chart-canvas-wrap"><canvas id="chart-route-whole"></canvas></div>
         </div>
       </div>
     </section>

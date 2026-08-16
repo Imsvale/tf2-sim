@@ -395,10 +395,45 @@ throughout.
       flat "stopped" segment at each station for that stop's loading +
       unloading dwell (see "Whole-route timing" under Financial features)
       — one continuous Speed-over-Time line per train covering the full
-      route (`chart-route-whole`, its own single-chart `CHART_GROUPS`
-      entry, `renderWholeRouteChart()` in `js/charts.js`). Lives on the
-      Route tab below the per-leg Leg Profile section; no leg selector
-      needed since it always shows the whole loop
+      route. Originally its own single-chart section below Leg Profile
+      (`chart-route-whole`); **superseded** by the entry below, which folds
+      it into the Leg selector instead of keeping it as a separate section.
+  - [x] Folded into the Leg selector as "All", at the top and the default
+        (`state.selectedLegIndex: -1`). Selecting it now renders the *same*
+        9 Leg Profile charts (Time/Track Distance/Crow-flies Distance
+        sections), just for the whole loop instead of one leg —
+        `renderRouteProfileChartsForRoute()` in `js/charts.js`, sharing a
+        new `simulateLegPoints()` helper with the single-leg
+        `renderRouteProfileCharts()` so the physics/run-brake-segmentation
+        logic lives in exactly one place. `chart-route-whole` and
+        `renderWholeRouteChart()` are gone; the 9 canvases are reused for
+        both modes (chart IDs, `CHART_GROUPS.route`, and the chart gallery
+        are unaffected — only which function renders into them changes).
+        The Time-axis instantaneous charts (Speed/Acceleration/Distance x2)
+        get a flat "dwell" segment spliced in between legs; the two
+        Distance-axis charts don't need one (distance can't move while
+        stopped, so one leg's line just picks up where the last one left
+        off). Average Speed is one continuous curve across the whole loop
+        (crow distance covered so far anywhere in the loop / wall-clock
+        time elapsed so far, dwell included) rather than resetting each
+        leg, with 2 bookend points per dwell so the drop while parked shows
+        up explicitly (a straight line between them, not the true 1/t
+        decay — a deliberate simplification). New
+        `breakEvenAverageSpeedForRoute_kmh()` in `js/finance.js` gives the
+        whole-route break-even line a single flat threshold — well-defined
+        despite dwell being in the mix because a station's hold time
+        doesn't depend on travel speed, only load factor and the wagons'
+        own loading speed, so total dwell time (and what it costs at the
+        stopped-maintenance discount) is fixed regardless of the travel
+        time being solved for. Verified against an independently-derived
+        formula and a revenue-equals-maintenance reverse-check at the
+        solved threshold (both exact to floating-point precision); notably
+        the whole-route threshold comes out *lower* than the equivalent
+        no-dwell threshold for the same crow distances — dwell dilutes the
+        average-speed denominator without costing maintenance
+        proportionally as much (the stopped rate is discounted), so the
+        bar is easier to clear, not harder, once dwell is folded into what
+        "average speed" means for the whole loop
 
 ## Financial features
 - [x] Per-leg and trip-total revenue, maintenance, profit, profit/real-hour,
