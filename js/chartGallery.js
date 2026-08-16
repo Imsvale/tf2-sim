@@ -1,4 +1,5 @@
 import { CHART_GROUPS, CHART_TITLES, chartGroupOf, getChartConfig, renderChartInto } from "./charts.js";
+import { iconSvg } from "./icons.js";
 
 // Lightbox-style gallery for the small chart cards: a maximize button opens
 // this modal large-in-viewport, with prev/next to cycle the charts within
@@ -54,7 +55,7 @@ function navigate(delta) {
 function updateFullscreenButton() {
   const { modal, fullscreenBtn } = els();
   const isFullscreen = document.fullscreenElement != null;
-  fullscreenBtn.textContent = isFullscreen ? "⤡" : "⤢";
+  fullscreenBtn.innerHTML = iconSvg(isFullscreen ? "fullscreen-exit" : "fullscreen");
   fullscreenBtn.title = isFullscreen ? "Exit fullscreen" : "Fullscreen";
   modal.classList.toggle("is-fullscreen", isFullscreen); // see css: hides the dimmed backdrop while truly fullscreen
 }
@@ -119,8 +120,13 @@ export function initChartGallery() {
   });
 
   // Wire every chart-card's maximize button here rather than in js/main.js —
-  // this module owns the gallery end to end.
+  // this module owns the gallery end to end. Icon set here too (rather than
+  // static markup in index.html) so every one of the 13 buttons stays in
+  // sync from a single source of truth.
   document.querySelectorAll(".chart-maximize").forEach((btn) => {
+    btn.innerHTML = iconSvg("arrows-angle-expand");
     btn.addEventListener("click", () => openChartGallery(btn.dataset.chartId));
   });
+
+  updateFullscreenButton(); // sets the initial (non-fullscreen) icon — index.html ships this button empty
 }

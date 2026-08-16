@@ -20,7 +20,9 @@ import { computeAccelerationStats } from "./physics.js";
 import { DIFFICULTY_FACTORS, tripSummary } from "./finance.js";
 import { renderCharts, renderFinanceCharts, renderRouteProfileCharts, renderWholeRouteChart, SERIES_SLOTS, seriesColor } from "./charts.js";
 import { initChartGallery } from "./chartGallery.js";
-import { saveState, loadState } from "./storage.js";
+import { saveState, loadState, validateState } from "./storage.js";
+import { decodeShareHash, buildShareUrl } from "./shareLink.js";
+import { iconSvg } from "./icons.js";
 import { imageForVehicle } from "./images.js";
 
 const state = {
@@ -260,74 +262,120 @@ function renderChip(train, trainIndex, item, type, indexInType, vehicle, isLastI
   return wrap;
 }
 
+/**
+ * Wraps a plain <input type="number"> in the compact themed pill (see css
+ * .num-field): hides the native spinner, adds stacked up/down arrows plus
+ * scroll-wheel stepping (while hovered, or from anywhere on the page once
+ * focused — the document-level listener is added/removed on focus/blur so
+ * it doesn't linger past the field losing focus), and an optional inline
+ * visual-only unit suffix. Arrows/wheel just nudge input.value by `step`
+ * (clamped to the input's own min/max attributes) and dispatch a real
+ * "change" event — so whatever "change" listener the caller already put on
+ * the input keeps working unmodified; this only changes how the value gets
+ * set, never what happens after. Originally built just for the Trains
+ * chip's quantity stepper, generalized site-wide per feedback that a plain
+ * number input looks out of place next to it.
+ */
+function wrapNumberField(input, { step = 1, unit, widthCh, upLabel = "Increase", downLabel = "Decrease" } = {}) {
+  if (widthCh != null) input.style.width = `${widthCh}ch`;
+
+  const wrap = document.createElement("div");
+  wrap.className = "num-field";
+
+  const clamp = (v) => {
+    if (input.min !== "" && v < Number(input.min)) v = Number(input.min);
+    if (input.max !== "" && v > Number(input.max)) v = Number(input.max);
+    return v;
+  };
+
+  const bump = (direction) => {
+    const current = Number(input.value) || 0;
+    input.value = clamp(current + direction * step);
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+
+  const arrows = document.createElement("div");
+  arrows.className = "num-field-arrows";
+
+  const upBtn = document.createElement("button");
+  upBtn.type = "button";
+  upBtn.className = "num-field-up";
+  upBtn.title = upLabel;
+  upBtn.setAttribute("aria-label", upLabel);
+  upBtn.addEventListener("click", () => bump(1));
+
+  const downBtn = document.createElement("button");
+  downBtn.type = "button";
+  downBtn.className = "num-field-down";
+  downBtn.title = downLabel;
+  downBtn.setAttribute("aria-label", downLabel);
+  downBtn.addEventListener("click", () => bump(-1));
+
+  // stopPropagation on the direct listener avoids double-stepping when
+  // both are active at once (hovering an already-focused field).
+  const onWheel = (e) => {
+    e.preventDefault();
+    bump(e.deltaY < 0 ? 1 : -1);
+  };
+  input.addEventListener(
+    "wheel",
+    (e) => {
+      onWheel(e);
+      e.stopPropagation();
+    },
+    { passive: false }
+  );
+  const onDocumentWheel = (e) => onWheel(e);
+  input.addEventListener("focus", () => document.addEventListener("wheel", onDocumentWheel, { passive: false }));
+  input.addEventListener("blur", () => document.removeEventListener("wheel", onDocumentWheel));
+
+  arrows.append(upBtn, downBtn);
+  wrap.append(input);
+  if (unit) {
+    const unitEl = document.createElement("span");
+    unitEl.className = "num-field-unit";
+    unitEl.textContent = unit;
+    wrap.appendChild(unitEl);
+  }
+  wrap.appendChild(arrows);
+  return wrap;
+}
+
+/** wrapNumberField, but for an <input> that's already sitting in the DOM (static markup, not built here) — reinserts the wrapper at the input's original spot instead of leaving it detached. */
+function wrapExistingNumberField(input, options) {
+  const { parentNode, nextSibling } = input;
+  const wrap = wrapNumberField(input, options);
+  parentNode.insertBefore(wrap, nextSibling);
+  return wrap;
+}
+
 // Compact quantity stepper, a direct child of .chip now (not a separate
 // popover field, not a sibling pill) — see renderChip. Stacked up/down
 // arrows on the trailing edge (rather than +/- flanking the input on each
 // side) — the leading "+" would sit right next to the mini-add button's
 // own "+" (a different action, insert a new group), so this avoids that
-// visual clash as well as just being more compact (see css .chip-qty).
+// visual clash as well as just being more compact (see css .chip-qty, a
+// width modifier on top of the shared .num-field widget).
 function buildChipQtyStepper(train, item, type, indexInType, vehicle) {
   const setQty = type === "locomotive" ? setLocomotiveQuantityAt : setWagonQuantityAt;
-  const wrap = document.createElement("div");
-  wrap.className = "chip-qty";
 
   const input = document.createElement("input");
   input.type = "number";
   input.min = "1";
   input.value = item.quantity;
   input.setAttribute("aria-label", `${vehicle.name} quantity`);
-
-  const commit = (newQty) => {
-    newQty = Math.max(1, Math.floor(newQty) || 1);
+  input.addEventListener("change", () => {
+    const newQty = Math.max(1, Math.floor(Number(input.value)) || 1);
     setQty(train, indexInType, newQty); // mutates `item` in place (same object, this train's array at this index)
     input.value = newQty;
     recompute();
-  };
+  });
 
-  const arrows = document.createElement("div");
-  arrows.className = "chip-qty-arrows";
-
-  const upBtn = document.createElement("button");
-  upBtn.type = "button";
-  upBtn.className = "chip-qty-up";
-  upBtn.title = "Increase quantity";
-  upBtn.setAttribute("aria-label", `Increase ${vehicle.name} quantity`);
-  upBtn.addEventListener("click", () => commit(item.quantity + 1));
-
-  const downBtn = document.createElement("button");
-  downBtn.type = "button";
-  downBtn.className = "chip-qty-down";
-  downBtn.title = "Decrease quantity";
-  downBtn.setAttribute("aria-label", `Decrease ${vehicle.name} quantity`);
-  downBtn.addEventListener("click", () => commit(item.quantity - 1));
-
-  input.addEventListener("change", () => commit(Number(input.value)));
-
-  // Scroll wheel adjusts the value too: while just hovering (the direct
-  // listener below), or from anywhere on the page once the field is
-  // focused (the document-level listener, added/removed on focus/blur so
-  // it doesn't linger — and outlives neither the field's focus nor, via
-  // that, the chip itself). stopPropagation on the direct listener avoids
-  // double-stepping when both are active at once (hovering an already-
-  // focused field).
-  const step = (e) => {
-    e.preventDefault();
-    commit(item.quantity + (e.deltaY < 0 ? 1 : -1));
-  };
-  input.addEventListener(
-    "wheel",
-    (e) => {
-      step(e);
-      e.stopPropagation();
-    },
-    { passive: false }
-  );
-  const onDocumentWheel = (e) => step(e);
-  input.addEventListener("focus", () => document.addEventListener("wheel", onDocumentWheel, { passive: false }));
-  input.addEventListener("blur", () => document.removeEventListener("wheel", onDocumentWheel));
-
-  arrows.append(upBtn, downBtn);
-  wrap.append(input, arrows);
+  const wrap = wrapNumberField(input, {
+    upLabel: `Increase ${vehicle.name} quantity`,
+    downLabel: `Decrease ${vehicle.name} quantity`,
+  });
+  wrap.classList.add("chip-qty"); // narrow-width modifier — see css
   return wrap;
 }
 
@@ -776,6 +824,7 @@ function renderAccelerationSection(aggregates) {
 function initRouteControls() {
   const select = document.getElementById("track-speed-limit-select");
   const custom = document.getElementById("track-speed-limit-custom");
+  const customField = wrapExistingNumberField(custom, { step: 10 });
 
   function applyTrackSpeedLimit() {
     if (select.value === "none") state.trackSpeedLimit_kmh = null;
@@ -785,13 +834,15 @@ function initRouteControls() {
   }
 
   select.addEventListener("change", () => {
-    custom.hidden = select.value !== "custom";
+    customField.hidden = select.value !== "custom";
     if (select.value === "custom") custom.focus();
     applyTrackSpeedLimit();
   });
   custom.addEventListener("change", applyTrackSpeedLimit);
 
-  document.getElementById("braking-decel-input").addEventListener("change", (e) => {
+  const brakingInput = document.getElementById("braking-decel-input");
+  wrapExistingNumberField(brakingInput, { step: 0.1, unit: "m/s²" });
+  brakingInput.addEventListener("change", (e) => {
     const value = Number(e.target.value);
     state.brakingDeceleration_ms2 = value > 0 ? value : 2.5;
     e.target.value = state.brakingDeceleration_ms2;
@@ -884,28 +935,29 @@ function buildRouteRow(station, index, aggregates) {
     routeNumberInput(leg.crowDistance_m != null ? leg.crowDistance_m / 1000 : "", (value) => {
       leg.crowDistance_m = value === "" ? null : Number(value) * 1000;
       recompute();
-    })
+    }, null, 6).field
   );
   row.appendChild(crowTd);
 
   const trackTd = document.createElement("td");
   const trackWrap = document.createElement("div");
   trackWrap.className = "route-track-cell";
-  const trackInput = routeNumberInput(
+  const track = routeNumberInput(
     leg.trackDistance_m != null ? leg.trackDistance_m / 1000 : "",
     (value) => {
       leg.trackDistance_m = value === "" ? null : Number(value) * 1000;
       recompute();
     },
-    "= distance"
+    null,
+    6
   );
-  trackWrap.appendChild(trackInput);
+  trackWrap.appendChild(track.field);
   const estimateBtn = document.createElement("button");
   estimateBtn.type = "button";
   estimateBtn.className = "route-estimate-btn";
   estimateBtn.textContent = "≈";
   estimateBtn.title = "Estimate track distance from an observed trip time";
-  estimateBtn.addEventListener("click", () => openTrackDistanceEstimatorPopover(estimateBtn, leg, trackInput, aggregates));
+  estimateBtn.addEventListener("click", () => openTrackDistanceEstimatorPopover(estimateBtn, leg, track.input, aggregates));
   trackWrap.appendChild(estimateBtn);
   trackTd.appendChild(trackWrap);
   row.appendChild(trackTd);
@@ -921,13 +973,14 @@ function buildRouteRow(station, index, aggregates) {
     loadInput.value = Math.round(leg.loadFactor * 100);
     recompute();
   });
-  loadTd.append(loadInput, "%");
+  loadTd.append(wrapNumberField(loadInput, { unit: "%", widthCh: 8 }));
   row.appendChild(loadTd);
 
   const removeTd = document.createElement("td");
   if (state.route.stations.length > 2) {
     const removeBtn = document.createElement("button");
     removeBtn.type = "button";
+    removeBtn.className = "route-remove-btn";
     removeBtn.textContent = "✕";
     removeBtn.setAttribute("aria-label", `Remove ${station.name}`);
     removeBtn.addEventListener("click", () => {
@@ -941,7 +994,7 @@ function buildRouteRow(station, index, aggregates) {
   return row;
 }
 
-function routeNumberInput(value, onChange, placeholder) {
+function routeNumberInput(value, onChange, placeholder, widthCh) {
   const input = document.createElement("input");
   input.type = "number";
   input.min = "0";
@@ -949,7 +1002,7 @@ function routeNumberInput(value, onChange, placeholder) {
   input.value = value;
   if (placeholder) input.placeholder = placeholder;
   input.addEventListener("change", () => onChange(input.value));
-  return input;
+  return { input, field: wrapNumberField(input, { step: 1, widthCh }) };
 }
 
 // Reuses the generic popover plumbing (closePopover/positionPopoverNear,
@@ -973,7 +1026,7 @@ function openTrackDistanceEstimatorPopover(anchorEl, leg, trackDistanceInput, ag
   timeInput.type = "number";
   timeInput.min = "0";
   timeInput.placeholder = "seconds";
-  helperRow.appendChild(timeInput);
+  helperRow.appendChild(wrapNumberField(timeInput, { step: 10, unit: "s", widthCh: 5 }));
 
   const trainSelect = document.createElement("select");
   aggregates.forEach((entry, i) => {
@@ -1242,20 +1295,54 @@ function applyLoadedUIState() {
 
   const trackSelect = document.getElementById("track-speed-limit-select");
   const trackCustom = document.getElementById("track-speed-limit-custom");
+  const trackCustomField = trackCustom.closest(".num-field"); // hide the whole pill, not just the input inside it
   if (state.trackSpeedLimit_kmh === null) {
     trackSelect.value = "none";
-    trackCustom.hidden = true;
+    trackCustomField.hidden = true;
   } else if (state.trackSpeedLimit_kmh === 120 || state.trackSpeedLimit_kmh === 300) {
     trackSelect.value = String(state.trackSpeedLimit_kmh);
-    trackCustom.hidden = true;
+    trackCustomField.hidden = true;
   } else {
     trackSelect.value = "custom";
-    trackCustom.hidden = false;
+    trackCustomField.hidden = false;
     trackCustom.value = state.trackSpeedLimit_kmh;
   }
   document.getElementById("braking-decel-input").value = state.brakingDeceleration_ms2;
 
   setActiveTab(state.activeTab);
+}
+
+// Copies a link that reproduces the current train/route/physics config for
+// whoever opens it — see js/shareLink.js for exactly what that does and
+// doesn't include. Text label rather than an icon — share icons are
+// commonly associated with social-media sharing specifically, not what
+// this is. Confirmation morphs the pill into a circle around a checkmark
+// for 1.5s (the shape's own CSS transition, see .share-link-btn/.copied —
+// this just toggles the class and swaps the content) — no toast system
+// elsewhere in the app to match instead.
+function initShareLink() {
+  const btn = document.getElementById("share-link-btn");
+  btn.textContent = "Share";
+
+  let resetTimer = null;
+  btn.addEventListener("click", async () => {
+    try {
+      const url = await buildShareUrl(state);
+      await navigator.clipboard.writeText(url);
+      btn.classList.add("copied");
+      btn.innerHTML = iconSvg("check2");
+      btn.setAttribute("aria-label", "Link copied to clipboard");
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => {
+        btn.classList.remove("copied");
+        btn.textContent = "Share";
+        btn.setAttribute("aria-label", "Copy a shareable link");
+      }, 1500);
+    } catch (e) {
+      console.error("Failed to copy share link:", e);
+      showWarning("Couldn't copy the link — your browser may be blocking clipboard access.");
+    }
+  });
 }
 
 async function init() {
@@ -1271,10 +1358,32 @@ async function init() {
   if (saved) Object.assign(state, saved); // only keys that validated are present, so this only overrides good data
   if (warning) showWarning(warning);
 
+  // A share link overrides both the defaults and localStorage above (same
+  // Object.assign-only-present-keys pattern), then is treated as this
+  // session's real state from here on — saved immediately and the hash
+  // cleared, rather than kept as a fragile one-time overlay that would
+  // silently keep re-applying (or go stale) across refreshes.
+  if (location.hash) {
+    try {
+      const decoded = await decodeShareHash(location.hash);
+      if (decoded) {
+        const { state: shared, warning: shareWarning } = validateState(decoded, state.vehicleById);
+        Object.assign(state, shared);
+        saveState(state);
+        if (shareWarning) showWarning(shareWarning);
+      }
+    } catch (e) {
+      console.error("Failed to decode shared link:", e);
+      showWarning("The link's shared configuration couldn't be read and was ignored.");
+    }
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+
   initTrainListControls();
   initAccelerationControls();
   initRouteControls();
   initFinanceControls();
+  initShareLink();
   initTheme(() => renderCharts(aggregatesWithLabels(), state.trackSpeedLimit_kmh));
 
   applyLoadedUIState();

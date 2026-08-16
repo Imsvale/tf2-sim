@@ -230,7 +230,7 @@ throughout.
       hues, never cycled; 9th+ train falls back to a shared muted color —
       see `--series-*` in css/styles.css and js/charts.js)
 - [x] Support more than 2 trains in a comparison (no cap)
-- [x] Chart gallery (`js/chartGallery.js`): a ⛶ button per chart card opens
+- [x] Chart gallery (`js/chartGallery.js`): a maximize button per chart card opens
       a large in-viewport lightbox with prev/next navigation, a separate
       true-fullscreen toggle (Fullscreen API, stacks on top of the
       maximized view rather than replacing it), and mouse wheel-zoom +
@@ -240,6 +240,90 @@ throughout.
         (5 per-leg bar charts, see below) — gallery prev/next stays
         confined to whichever group it was opened from
         (`CHART_GROUPS`/`chartGroupOf()` in `js/charts.js`)
+  - [x] Per-axis scaling: dragging directly on an axis (below the x-axis'
+        labels, or left of the y-axis') scales *that axis specifically* —
+        dragging in the axis' own increasing direction (right for x, up
+        for y) contracts the visible range (zooms in), back toward zero
+        expands it (zooms out) — inverted once from the first pass, which
+        had this backwards. Always anchored at zero (min is always 0, never
+        negative) rather than at the cursor's value — negative values are
+        out of scope for every axis in this app (speed, time, distance,
+        money)
+        (`createAxisDragZoomPlugin()` in `js/charts.js`, a real per-chart
+        Chart.js plugin — `afterInit`/`destroy` hooks, so cleanup is
+        automatic whenever the gallery destroys/replaces the modal chart).
+        Deliberately scoped to outside `chart.chartArea` so it can never
+        compete with the zoom plugin's in-area pan/drag for the same
+        gesture. Wheel-zoom and pan got the same zero-anchor treatment via
+        the zoom plugin's own `limits: {x:{min:0}, y:{min:0}}` option, and
+        `scaleMode` (hovering an axis while scrolling restricts the zoom to
+        that axis too) — most useful on the whole-route graph, whose
+        x-axis (real seconds across a full loop) is otherwise heavily
+        compressed. All three (drag, wheel, pan) verified against a real
+        Chart.js instance in a headless browser, not just read against the
+        docs — see the next two items, where an initial docs-only pass
+        turned out to be wrong on both
+  - [x] Drag-to-pan reported not working — root cause found by inspecting
+        the vendored zoom plugin's own minified source: its Pan (and
+        Pinch) feature is built on Hammer.js's gesture-recognizer API
+        (`require("hammerjs")` in its own UMD header), and the app never
+        loaded Hammer.js — `index.html` only had `chart.umd.min.js` and
+        `chartjs-plugin-zoom.umd.min.js`. Without a global `window.Hammer`,
+        the plugin silently skips setting up pan/pinch (no console error),
+        while wheel-zoom (a plain DOM `wheel` listener, no Hammer needed)
+        keeps working fine — matching the exact reported symptom exactly.
+        Fixed by vendoring `vendor/hammer.min.js` (hammerjs 2.0.8) and
+        loading it before the zoom plugin's own script tag. Confirmed
+        fixed with real mouse-drag events against a live Chart.js instance
+        in a headless browser (not just "the dependency is now present") —
+        an earlier session note claiming "Hammer.js only needed for
+        touch/pinch, not mouse" was wrong and is superseded by this
+  - [x] Fixed two related rendering bugs, once zoomed/panned to an
+        arbitrary (non-"nice") range: a many-decimal number shown right at
+        the exact min/max boundary, and the next "nice" tick in sometimes
+        missing entirely. A first attempt (`trimBoundaryTicks()` deleting a
+        boundary tick when it sat too close to its neighbor) passed
+        isolated logic tests but did nothing in the real app — a headless-
+        browser trace against a live Chart.js instance showed why: Chart.js
+        doesn't crowd a boundary tick against its neighbor and then need
+        pruning, it silently never *generates* the interior tick in the
+        first place (zoomed to [526.3, 1034.7], the raw tick array comes
+        back as `[526.3, 600, 700, 800, 900, 1034.7]` — 1000 is just never
+        there), so by the time the old fix ran there was nothing left to
+        detect. Rewritten to rebuild instead of trim: read the regular step
+        from any two interior (always on-grid) ticks, then regenerate
+        every multiple of that step inside `[scale.min, scale.max]` from
+        scratch, discarding Chart.js's raw array entirely. Confirmed
+        against the exact reported case, the reported y-axis case, an
+        already-on-grid range (left untouched), and an extreme zoom-in
+        (many sub-integer ticks, no crash) — all in a real Chart.js
+        instance, not just a hand-written array trace
+  - [x] Vertical pan wasn't blocked while dragging on the x-axis to scale
+        it, and vice versa — Hammer's gesture recognizer is attached to the
+        whole `<canvas>`, not just `chart.chartArea`, so a drag starting in
+        the axis-drag-zoom plugin's own hot zone (below/left of the plot
+        area, but still part of the same canvas element) also kicked off
+        the built-in pan at the same time, moving the *other* axis too.
+        Fixed with the zoom plugin's `pan.onPanStart` hook — rejects any
+        pan whose start point falls outside `chart.chartArea`, keeping the
+        two gestures mutually exclusive by region. Confirmed live: dragging
+        the x-axis zone no longer moves the y-axis' min/max at all
+  - [x] Axis tick labels could show raw binary-floating-point noise once
+        the tick-rebuild fix above was multiplying rather than reading
+        Chart.js's own (differently-generated) labels — e.g. a y-axis
+        0–1.6 stepped by 0.2 could show "0.6000000000000001" or
+        "1.5999999999999998" at a couple of ticks, with inconsistent
+        decimal counts between ticks. Unfixable at the source (binary
+        floats can't represent 0.2 exactly) but a non-issue once formatted:
+        `formatAxisTick()`/`decimalPlacesForStep()` in `js/charts.js` read
+        the regular step directly off the (already-uniform,
+        post-`trimBoundaryTicks`) tick array and round every label to just
+        enough decimal places to represent that step exactly — confirmed
+        against the exact reported values. `trimBoundaryTicks()` itself
+        also switched from repeatedly adding `step` in a loop (which
+        accumulates float error further with every tick) to computing each
+        tick independently as `anchor + k*step`, so there's less noise to
+        clean up in the first place
 - [ ] Profit-over-time graph, once a financial simulation (below) exists
 - [x] Route graphs: each train's full door-to-door profile for one
       selected leg — accelerate, cruise if the leg's long enough, then
@@ -410,6 +494,70 @@ throughout.
       alongside the existing light/dark token blocks in css/styles.css) —
       without it, every spin button rendered in light browser chrome
       (a bright box) regardless of the app's own dark mode
+- [x] Chart-card header compacted: title and the maximize button now share
+      one flex row (`.chart-card-header` in css/styles.css) instead of the
+      button being absolutely positioned over the title, which was
+      reserving extra vertical space above it
+  - [x] The Route tab's own chart cards kept the old extra-space bug after
+        the fix above — root cause was `#tab-route h3 { margin: 2rem 0
+        0.5rem }` (meant only for the "Leg Profile"/"Whole Route" section
+        headings): as a plain descendant selector it also matched the
+        `<h3>` nested inside those cards' own `.chart-card-header`, and
+        being ID-scoped it beat that header's own `margin: 0` regardless of
+        which rule came later. Changed to `#tab-route > h3` (direct-child
+        combinator) so it only matches the section headings, which really
+        are direct children of the tab's `<section>` — no other tab has an
+        ID-scoped `h3` rule, which is why only Route's cards showed it
+- [x] Numeric-input widget (originally just the Trains chip's quantity
+      stepper — bordered pill, native spinner hidden, stacked up/down
+      arrows, scroll-wheel stepping) generalized site-wide
+      (`wrapNumberField()`/`wrapExistingNumberField()` in js/main.js, css
+      `.num-field`/`.chip-qty` — the latter now just a narrow-width
+      modifier on the former) — covers the route table's distance/load%
+      fields, the track-speed-limit and braking-deceleration fields, and
+      the track-distance estimator popover's time field. The braking
+      deceleration and load % fields also gained an inline, purely-visual
+      unit suffix ("m/s²"/"%") inside the field itself, replacing a
+      separate adjacent text label. Custom-built for this app (not a
+      library) — plain DOM/CSS, no dependency
+- [x] Route table rows more compact — reduced cell and text-input vertical
+      padding scoped to `#route-table` specifically (the shared
+      `.compare-table` class used by 3 other tables is untouched)
+- [x] Route table numeric-field sizing tuned twice: first pass narrowed
+      crow/track distance to `widthCh: 3` and widened Load % to `widthCh: 4`
+      — too narrow in practice once `box-sizing: border-box` (global reset)
+      is accounted for, since the field's own left padding eats into that
+      character budget rather than sitting outside it. Doubled to `6`/`8`,
+      left padding reduced (8px → 4px), and a small right padding added so
+      the digits don't sit flush against whatever follows (the arrows, or
+      Load %'s own "%" suffix — which also got a bit bigger and a bit more
+      breathing room, `#route-table .num-field-unit` in css/styles.css).
+      The track-distance field's "= distance" placeholder was also removed
+      (blank instead — read as unhelpfully cute). All four route-table
+      controls (text input, the two numeric widgets, the ≈ estimate button,
+      the ✕ remove button) share one explicit `height: 28px` so the row
+      reads as one aligned strip — previously 30px/28.375px/38px/20px, all
+      different. The numeric-field widget needed no structural change to
+      scale up: its up/down arrows already stretch to fill the wrapper's
+      height for free (`.num-field`'s `align-items: stretch` + the arrows
+      column's own flex children)
+- [x] Maximize/fullscreen icons switched to Bootstrap Icons (MIT), the
+      project's first icon library — vendored individually as adopted
+      (`vendor/icons/*.svg`, credited in CREDITS.md), inlined via
+      `js/icons.js`'s `iconSvg()` (not `<img>`, so `color` still themes
+      them like the text glyphs they replace did). First pass hand-rolled a
+      CSS "inward-pointing brackets" icon for exiting fullscreen, chasing a
+      distinction between "maximize", "enter fullscreen", "exit
+      fullscreen", and a minimize button that was never actually part of
+      this UI — overthought; there was never a need to touch the exit icon
+      specifically. Landed on: small-card "Maximize" button uses
+      `arrows-angle-expand`; the gallery's fullscreen toggle uses
+      `fullscreen`/`fullscreen-exit` — real semantic icons instead of
+      guessing at what a generic arrow glyph's direction implies, so the
+      hand-drawn CSS icon (and the `.fs-compress-icon` it lived in) was
+      removed rather than kept. The small-card icon is also now visibly
+      bigger (20px, was a 0.9rem glyph) per follow-up feedback that it read
+      too small
 - [ ] GitHub Actions deploy workflow if the project ever needs a build step
       (not needed yet — plain static site deploys directly)
 - [ ] Accessibility pass on the tab/chip/popover UI (tabs and popovers use

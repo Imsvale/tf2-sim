@@ -123,7 +123,7 @@ a:visited {
   color: var(--text-muted);
 }
 
-.theme-toggle {
+.header-icon-btn {
   position: absolute;
   top: 1.75rem;
   right: 1.5rem;
@@ -133,7 +133,6 @@ a:visited {
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   color: var(--text);
-  font-size: 1.1rem;
   cursor: pointer;
   box-shadow: var(--shadow);
   display: flex;
@@ -142,8 +141,63 @@ a:visited {
   transition: transform 0.15s ease;
 }
 
-.theme-toggle:hover {
+.header-icon-btn:hover {
   transform: scale(1.06);
+}
+
+.theme-toggle {
+  font-size: 1.1rem;
+}
+
+/* Text pill at rest ("Share"), morphs into a circle around a checkmark on
+   copy (js/main.js's initShareLink() toggles .copied and swaps the
+   content). `right` (not `left`) is what's animating here in effect —
+   anchoring the *right* edge means the shape can grow/shrink purely
+   leftward, so it never has to jump position relative to the theme toggle
+   next to it regardless of which state's width is wider. width/padding
+   are explicit pixel values in both states (not auto) specifically so
+   they're transitionable — animating to/from `auto` doesn't reliably
+   work. */
+.share-link-btn {
+  right: 4.25rem;
+  width: 5rem;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: transform 0.15s ease, width 0.3s ease, border-radius 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+.share-link-btn svg {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+}
+
+.share-link-btn.copied {
+  width: 2.5rem;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+@keyframes share-check-pop {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.share-link-btn.copied svg {
+  animation: share-check-pop 0.25s ease;
 }
 
 main {
@@ -479,11 +533,15 @@ button.primary {
   text-overflow: ellipsis;
 }
 
-/* Compact quantity stepper, a sibling of .chip (not nested inside it — see
-   js/main.js's buildChipQtyStepper). Stacked up/down arrows on the
-   trailing edge replace the number input's native spinner (which is both
-   wider than this and, pre-color-scheme fix, could look inconsistent
-   across browsers/themes).
+/* Compact themed replacement for a bare <input type="number"> — stacked
+   up/down arrows replace the browser's native spinner (both wider than
+   this and, pre-color-scheme fix, inconsistent-looking across browsers/
+   themes) and an optional inline unit suffix. Originally built just for
+   the Trains chip's quantity stepper (a sibling of .chip, not nested
+   inside it — see js/main.js's buildChipQtyStepper); generalized site-wide
+   (js/main.js's wrapNumberField) since it reads better than a plain number
+   input everywhere else too. .chip-qty (below) is a width modifier for
+   that original narrow use, applied alongside this base class.
 
    No overflow:hidden here (unlike most other pill/chip shapes in this
    file) — the rounded-corner look instead comes from putting the
@@ -493,16 +551,17 @@ button.primary {
    focus ring now lives on the wrapper itself (:focus-within, below),
    which nothing clips.
 
-   position+z-index here are load-bearing, not decorative: a positioned
-   element (.chip-type-select, position:absolute) otherwise always paints
-   above a non-positioned sibling regardless of DOM order, which would let
-   the invisible select swallow clicks meant for this stepper. Being
-   explicitly positioned with a higher z-index is what makes this win
-   instead. */
-.chip-qty {
+   position+z-index here are load-bearing, not decorative in the Trains
+   chip context specifically: a positioned element (.chip-type-select,
+   position:absolute) otherwise always paints above a non-positioned
+   sibling regardless of DOM order, which would let the invisible select
+   swallow clicks meant for this stepper. Being explicitly positioned with
+   a higher z-index is what makes this win instead — harmless everywhere
+   else this class is used, since nothing else stacks a sibling on top. */
+.num-field {
   position: relative;
   z-index: 1;
-  display: flex;
+  display: inline-flex;
   align-items: stretch;
   height: 20px;
   border: 1px solid var(--border);
@@ -510,13 +569,29 @@ button.primary {
   flex-shrink: 0;
 }
 
-.chip-qty:focus-within {
+.num-field:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }
 
-.chip-qty input[type="number"] {
+/* Same reasoning as .warning-banner[hidden] above: `display: inline-flex`
+   otherwise beats the browser's default `[hidden]` rule, so the custom
+   track-speed-limit field would stay visible regardless of the `hidden`
+   main.js toggles on its wrapper. */
+.num-field[hidden] {
+  display: none;
+}
+
+/* Narrow-width modifier for the original Trains-chip quantity use — most
+   other fields (distances, percentages, speeds) need more room than a 1-2
+   digit quantity does, so width is otherwise left to the input's own size
+   (set inline per field by wrapNumberField's widthCh option). */
+.num-field.chip-qty input[type="number"] {
   width: 1.6rem;
+}
+
+.num-field input[type="number"] {
+  width: 3rem;
   padding: 0 0 0 5px;
   border: none;
   border-radius: 5px 0 0 5px;
@@ -528,13 +603,22 @@ button.primary {
   outline: none; /* focus shown by the wrapper's box-shadow above instead */
 }
 
-.chip-qty input[type="number"]::-webkit-inner-spin-button,
-.chip-qty input[type="number"]::-webkit-outer-spin-button {
+.num-field input[type="number"]::-webkit-inner-spin-button,
+.num-field input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
 
-.chip-qty-arrows {
+.num-field-unit {
+  align-self: center;
+  padding: 0 4px 0 2px;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  pointer-events: none; /* purely visual — clicks pass through to the input/arrows */
+}
+
+.num-field-arrows {
   display: flex;
   flex-direction: column;
   width: 13px;
@@ -542,8 +626,8 @@ button.primary {
   border-left: 1px solid var(--border);
 }
 
-.chip-qty-up,
-.chip-qty-down {
+.num-field-up,
+.num-field-down {
   flex: 1;
   padding: 0;
   border: none;
@@ -554,24 +638,24 @@ button.primary {
   cursor: pointer;
 }
 
-.chip-qty-up {
+.num-field-up {
   border-radius: 0 4px 0 0;
   border-bottom: 1px solid var(--border);
 }
 
-.chip-qty-down {
+.num-field-down {
   border-radius: 0 0 4px 0;
 }
 
-.chip-qty-up:hover,
-.chip-qty-down:hover {
+.num-field-up:hover,
+.num-field-down:hover {
   background: var(--border);
 }
 
 /* CSS-drawn triangles instead of glyphs — crisp at this size regardless of
    font/platform, unlike ▲/▼ which can render blurry or off-center this small. */
-.chip-qty-up::before,
-.chip-qty-down::before {
+.num-field-up::before,
+.num-field-down::before {
   content: "";
   width: 0;
   height: 0;
@@ -579,19 +663,19 @@ button.primary {
   border-right: 3px solid transparent;
 }
 
-.chip-qty-up::before {
+.num-field-up::before {
   border-bottom: 3px solid var(--text-muted);
 }
 
-.chip-qty-down::before {
+.num-field-down::before {
   border-top: 3px solid var(--text-muted);
 }
 
-.chip-qty-up:hover::before {
+.num-field-up:hover::before {
   border-bottom-color: var(--text);
 }
 
-.chip-qty-down:hover::before {
+.num-field-down:hover::before {
   border-top-color: var(--text);
 }
 
@@ -693,10 +777,17 @@ button.primary {
   flex-direction: column;
 }
 
-.chart-card h3 {
-  margin: 0 0 0.5rem;
+.chart-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.chart-card-header h3 {
+  margin: 0;
   font-size: 0.95rem;
-  padding-right: 1.75rem; /* keep the title clear of the maximize button */
 }
 
 /* Chart.js's responsive sizing reads the canvas's own flex-resolved box —
@@ -720,15 +811,19 @@ button.primary {
 }
 
 .chart-maximize {
-  position: absolute;
-  top: 0.6rem;
-  right: 0.6rem;
-  width: 1.6rem;
-  height: 1.6rem;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
   padding: 0;
-  line-height: 1;
-  font-size: 0.9rem;
   color: var(--text-muted);
+}
+
+.chart-maximize svg {
+  width: 16px;
+  height: 16px;
 }
 
 .chart-maximize:hover {
@@ -808,6 +903,17 @@ body.chart-gallery-open {
   flex-shrink: 0;
 }
 
+#chart-gallery-fullscreen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#chart-gallery-fullscreen svg {
+  width: 16px;
+  height: 16px;
+}
+
 .chart-gallery-body {
   flex: 1;
   min-height: 0;
@@ -871,14 +977,67 @@ body.chart-gallery-open {
   cursor: pointer;
 }
 
+/* More compact than the shared .compare-table default (other tables using
+   that class — train specs, acceleration, trip summary — are unaffected,
+   this only targets the route table's own rows/cells). */
+#route-table td,
+#route-table th {
+  padding: 0.35rem 0.9rem;
+}
+
+/* Every control in this table (text input, numeric-field widgets, the ≈
+   estimate button, the ✕ remove button) shares one explicit height so the
+   row reads as a single aligned strip — box-sizing:border-box (global
+   reset above) makes this exact regardless of each element's own
+   padding/border. Distance/load widths are set inline per field via
+   wrapNumberField's widthCh (see js/main.js's buildRouteRow) instead of
+   here, since they deliberately differ from each other. */
 #route-table input[type="text"] {
   width: 100%;
   min-width: 8rem;
+  height: 28px;
+  padding: 0 0.5rem;
 }
 
-#route-table td:nth-child(2) input[type="number"],
-#route-table td:nth-child(4) input[type="number"] {
-  width: 4.5rem;
+/* Proportionally bigger than the default .num-field size (built for the
+   Trains chip's much smaller quantity stepper) — the up/down arrows
+   already stretch to fill the wrapper's height for free (.num-field's
+   align-items:stretch + .num-field-arrows's flex column), only the font
+   size and arrow/triangle proportions need scaling up to match. */
+#route-table .num-field {
+  height: 28px;
+}
+
+#route-table .num-field input[type="number"] {
+  padding-left: 4px;
+  padding-right: 4px;
+  font-size: 0.85rem;
+}
+
+/* Slightly bigger than the base .num-field-unit size, and with a touch
+   more room before it, so "100%" doesn't read as cramped against the
+   digits. */
+#route-table .num-field-unit {
+  font-size: 0.8rem;
+  padding-left: 4px;
+}
+
+#route-table .num-field-arrows {
+  width: 18px;
+}
+
+#route-table .num-field-up::before,
+#route-table .num-field-down::before {
+  border-left-width: 4px;
+  border-right-width: 4px;
+}
+
+#route-table .num-field-up::before {
+  border-bottom-width: 4px;
+}
+
+#route-table .num-field-down::before {
+  border-top-width: 4px;
 }
 
 .route-track-cell {
@@ -887,13 +1046,11 @@ body.chart-gallery-open {
   gap: 0.4rem;
 }
 
-.route-track-cell input[type="number"] {
-  width: 4.5rem;
-}
-
-.route-estimate-btn {
+.route-estimate-btn,
+.route-remove-btn {
   flex-shrink: 0;
-  padding: 0.2rem 0.5rem;
+  height: 28px;
+  padding: 0 0.6rem;
 }
 
 .leg-helper-result {
@@ -906,7 +1063,14 @@ body.chart-gallery-open {
   margin-top: 0.5rem;
 }
 
-#tab-route h3 {
+/* Direct-child combinator, not a plain descendant selector — this is meant
+   for the "Leg Profile"/"Whole Route" section headings only. A descendant
+   selector here would also match the <h3> nested inside each chart card's
+   .chart-card-header (several levels deeper), and since an ID beats a
+   class regardless of source order, it would win over that h3's own
+   `margin: 0` — pushing the title down inside the header's flex row and
+   leaving the maximize button sitting visibly higher than it. */
+#tab-route > h3 {
   font-size: 0.95rem;
   margin: 2rem 0 0.5rem;
 }

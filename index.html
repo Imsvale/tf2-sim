@@ -10,7 +10,8 @@
   <header class="site-header">
     <h1>TF2 Sim</h1>
     <p class="tagline">Train performance &amp; profit calculator for Transport Fever 2</p>
-    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle light/dark theme">
+    <button id="share-link-btn" class="header-icon-btn share-link-btn" type="button" title="Copy a shareable link" aria-label="Copy a shareable link"></button>
+    <button id="theme-toggle" class="header-icon-btn theme-toggle" type="button" aria-label="Toggle light/dark theme">
       <span class="theme-toggle-icon" aria-hidden="true">🌙</span>
     </button>
   </header>
@@ -77,28 +78,38 @@
 
       <div class="chart-grid">
         <div class="chart-card">
-          <h3>Force vs. Speed</h3>
-          <button class="chart-maximize" type="button" data-chart-id="chart-force" title="Maximize" aria-label="Maximize Force vs. Speed">⛶</button>
+          <div class="chart-card-header">
+            <h3>Force vs. Speed</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-force" title="Maximize" aria-label="Maximize Force vs. Speed"></button>
+          </div>
           <div class="chart-canvas-wrap"><canvas id="chart-force"></canvas></div>
         </div>
         <div class="chart-card">
-          <h3>Acceleration vs. Speed</h3>
-          <button class="chart-maximize" type="button" data-chart-id="chart-acceleration" title="Maximize" aria-label="Maximize Acceleration vs. Speed">⛶</button>
+          <div class="chart-card-header">
+            <h3>Acceleration vs. Speed</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-acceleration" title="Maximize" aria-label="Maximize Acceleration vs. Speed"></button>
+          </div>
           <div class="chart-canvas-wrap"><canvas id="chart-acceleration"></canvas></div>
         </div>
         <div class="chart-card">
-          <h3>Speed over Time</h3>
-          <button class="chart-maximize" type="button" data-chart-id="chart-speed" title="Maximize" aria-label="Maximize Speed over Time">⛶</button>
+          <div class="chart-card-header">
+            <h3>Speed over Time</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-speed" title="Maximize" aria-label="Maximize Speed over Time"></button>
+          </div>
           <div class="chart-canvas-wrap"><canvas id="chart-speed"></canvas></div>
         </div>
         <div class="chart-card">
-          <h3>Distance over Time</h3>
-          <button class="chart-maximize" type="button" data-chart-id="chart-distance" title="Maximize" aria-label="Maximize Distance over Time">⛶</button>
+          <div class="chart-card-header">
+            <h3>Distance over Time</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-distance" title="Maximize" aria-label="Maximize Distance over Time"></button>
+          </div>
           <div class="chart-canvas-wrap"><canvas id="chart-distance"></canvas></div>
         </div>
         <div class="chart-card">
-          <h3>Speed over Distance</h3>
-          <button class="chart-maximize" type="button" data-chart-id="chart-speed-distance" title="Maximize" aria-label="Maximize Speed over Distance">⛶</button>
+          <div class="chart-card-header">
+            <h3>Speed over Distance</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-speed-distance" title="Maximize" aria-label="Maximize Speed over Distance"></button>
+          </div>
           <div class="chart-canvas-wrap"><canvas id="chart-speed-distance"></canvas></div>
         </div>
       </div>
@@ -117,7 +128,6 @@
         <input id="track-speed-limit-custom" type="number" min="1" placeholder="km/h" hidden>
         <label for="braking-decel-input">Braking deceleration</label>
         <input id="braking-decel-input" type="number" min="0.1" step="0.1" value="2.5">
-        <span>m/s&sup2;</span>
       </div>
       <p class="hint">
         A global cap on achieved speed. Doesn't affect where each train's own acceleration taper
@@ -152,13 +162,17 @@
       </p>
       <div class="chart-grid">
         <div class="chart-card">
-          <h3>Speed vs Distance</h3>
-          <button class="chart-maximize" type="button" data-chart-id="chart-route-speed-distance" title="Maximize" aria-label="Maximize Speed vs Distance">⛶</button>
+          <div class="chart-card-header">
+            <h3>Speed vs Distance</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-route-speed-distance" title="Maximize" aria-label="Maximize Speed vs Distance"></button>
+          </div>
           <div class="chart-canvas-wrap"><canvas id="chart-route-speed-distance"></canvas></div>
         </div>
         <div class="chart-card">
-          <h3>Speed vs Time</h3>
-          <button class="chart-maximize" type="button" data-chart-id="chart-route-speed-time" title="Maximize" aria-label="Maximize Speed vs Time">⛶</button>
+          <div class="chart-card-header">
+            <h3>Speed vs Time</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-route-speed-time" title="Maximize" aria-label="Maximize Speed vs Time"></button>
+          </div>
           <div class="chart-canvas-wrap"><canvas id="chart-route-speed-time"></canvas></div>
         </div>
       </div>
@@ -170,8 +184,10 @@
       </p>
       <div class="chart-grid">
         <div class="chart-card">
-          <h3>Speed over Time</h3>
-          <button class="chart-maximize" type="button" data-chart-id="chart-route-whole" title="Maximize" aria-label="Maximize Speed over Time">⛶</button>
+          <div class="chart-card-header">
+            <h3>Speed over Time</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-route-whole" title="Maximize" aria-label="Maximize Speed over Time"></button>
+          </div>
           <div class="chart-canvas-wrap"><canvas id="chart-route-whole"></canvas></div>
         </div>
       </div>
@@ -194,7 +210,7 @@
         </select>
         <label for="include-stops-checkbox" class="checkbox-label">
           <input id="include-stops-checkbox" type="checkbox">
-          Include stops (loading, unloading, braking)
+          Include stops
         </label>
       </div>
 
@@ -212,28 +228,38 @@
 
       <div class="chart-grid">
         <div class="chart-card">
-          <h3>Time per Leg</h3>
-          <button class="chart-maximize" type="button" data-chart-id="chart-leg-time" title="Maximize" aria-label="Maximize Time per Leg">⛶</button>
+          <div class="chart-card-header">
+            <h3>Time per Leg</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-leg-time" title="Maximize" aria-label="Maximize Time per Leg"></button>
+          </div>
           <div class="chart-canvas-wrap"><canvas id="chart-leg-time"></canvas></div>
         </div>
         <div class="chart-card">
-          <h3>Average Speed per Leg</h3>
-          <button class="chart-maximize" type="button" data-chart-id="chart-leg-speed" title="Maximize" aria-label="Maximize Average Speed per Leg">⛶</button>
+          <div class="chart-card-header">
+            <h3>Average Speed per Leg</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-leg-speed" title="Maximize" aria-label="Maximize Average Speed per Leg"></button>
+          </div>
           <div class="chart-canvas-wrap"><canvas id="chart-leg-speed"></canvas></div>
         </div>
         <div class="chart-card">
-          <h3>Revenue per Leg</h3>
-          <button class="chart-maximize" type="button" data-chart-id="chart-leg-revenue" title="Maximize" aria-label="Maximize Revenue per Leg">⛶</button>
+          <div class="chart-card-header">
+            <h3>Revenue per Leg</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-leg-revenue" title="Maximize" aria-label="Maximize Revenue per Leg"></button>
+          </div>
           <div class="chart-canvas-wrap"><canvas id="chart-leg-revenue"></canvas></div>
         </div>
         <div class="chart-card">
-          <h3>Maintenance per Leg</h3>
-          <button class="chart-maximize" type="button" data-chart-id="chart-leg-maintenance" title="Maximize" aria-label="Maximize Maintenance per Leg">⛶</button>
+          <div class="chart-card-header">
+            <h3>Maintenance per Leg</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-leg-maintenance" title="Maximize" aria-label="Maximize Maintenance per Leg"></button>
+          </div>
           <div class="chart-canvas-wrap"><canvas id="chart-leg-maintenance"></canvas></div>
         </div>
         <div class="chart-card">
-          <h3>Profit per Leg</h3>
-          <button class="chart-maximize" type="button" data-chart-id="chart-leg-profit" title="Maximize" aria-label="Maximize Profit per Leg">⛶</button>
+          <div class="chart-card-header">
+            <h3>Profit per Leg</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-leg-profit" title="Maximize" aria-label="Maximize Profit per Leg"></button>
+          </div>
           <div class="chart-canvas-wrap"><canvas id="chart-leg-profit"></canvas></div>
         </div>
       </div>
@@ -251,7 +277,7 @@
         <h3 id="chart-gallery-title" class="chart-gallery-title"></h3>
         <div class="chart-gallery-actions">
           <button id="chart-gallery-reset-zoom" type="button" title="Reset zoom">Reset zoom</button>
-          <button id="chart-gallery-fullscreen" type="button" title="Fullscreen">⤢</button>
+          <button id="chart-gallery-fullscreen" type="button" title="Fullscreen"></button>
           <button id="chart-gallery-close" type="button" title="Close" aria-label="Close">✕</button>
         </div>
       </div>
@@ -265,6 +291,7 @@
   </div>
 
   <script src="vendor/chart.umd.min.js"></script>
+  <script src="vendor/hammer.min.js"></script>
   <script src="vendor/chartjs-plugin-zoom.umd.min.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>

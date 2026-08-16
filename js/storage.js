@@ -45,6 +45,21 @@ export function loadState(vehicleById) {
     return { state: null, warning: "Saved data was corrupted and has been reset to defaults." };
   }
 
+  return validateState(parsed, vehicleById);
+}
+
+/**
+ * The same validation `loadState` applies to localStorage's JSON, exposed
+ * separately so js/shareLink.js can apply it to a decoded share-link
+ * payload too — that's also untrusted, hand-editable-URL input, and needs
+ * exactly the same defense (dropped vehicle IDs, range clamping, etc.), not
+ * a parallel copy of it. `parsed` must already be a plain object (both
+ * callers get there differently — one via localStorage JSON.parse, the
+ * other via decompress+JSON.parse — so parsing itself isn't shared).
+ * @param {Map} vehicleById
+ * @returns {{ state: object, warning: string|null }} same shape as loadState's return.
+ */
+export function validateState(parsed, vehicleById) {
   const state = {};
   const warnings = [];
 
