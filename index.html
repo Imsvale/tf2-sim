@@ -115,10 +115,14 @@
           <option value="custom">Custom&hellip;</option>
         </select>
         <input id="track-speed-limit-custom" type="number" min="1" placeholder="km/h" hidden>
+        <label for="braking-decel-input">Braking deceleration</label>
+        <input id="braking-decel-input" type="number" min="0.1" step="0.1" value="2.5">
+        <span>m/s&sup2;</span>
       </div>
       <p class="hint">
         A global cap on achieved speed. Doesn't affect where each train's own acceleration taper
-        starts — that's always tied to its own rated top speed.
+        starts — that's always tied to its own rated top speed. Braking deceleration is flat
+        (vanilla default 2.5 m/s&sup2;) and used by the leg profile graphs below.
       </p>
 
       <div class="table-wrap">
@@ -136,6 +140,41 @@
         </table>
       </div>
       <button id="add-station-btn" type="button">Add station</button>
+
+      <h3>Leg Profile</h3>
+      <div class="control-row">
+        <label for="route-leg-select">Leg</label>
+        <select id="route-leg-select"></select>
+      </div>
+      <p class="hint">
+        Each train's full run for the selected leg alone: accelerate, cruise if there's room, then
+        brake to a stop at the station. The dashed tail of each line is the braking phase.
+      </p>
+      <div class="chart-grid">
+        <div class="chart-card">
+          <h3>Speed vs Distance</h3>
+          <button class="chart-maximize" type="button" data-chart-id="chart-route-speed-distance" title="Maximize" aria-label="Maximize Speed vs Distance">⛶</button>
+          <div class="chart-canvas-wrap"><canvas id="chart-route-speed-distance"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3>Speed vs Time</h3>
+          <button class="chart-maximize" type="button" data-chart-id="chart-route-speed-time" title="Maximize" aria-label="Maximize Speed vs Time">⛶</button>
+          <div class="chart-canvas-wrap"><canvas id="chart-route-speed-time"></canvas></div>
+        </div>
+      </div>
+
+      <h3>Whole Route</h3>
+      <p class="hint">
+        The entire loop, every leg back to back, including braking into each station and the
+        loading/unloading dwell there. The flat stretches are stops.
+      </p>
+      <div class="chart-grid">
+        <div class="chart-card">
+          <h3>Speed over Time</h3>
+          <button class="chart-maximize" type="button" data-chart-id="chart-route-whole" title="Maximize" aria-label="Maximize Speed over Time">⛶</button>
+          <div class="chart-canvas-wrap"><canvas id="chart-route-whole"></canvas></div>
+        </div>
+      </div>
     </section>
 
     <section id="tab-financials" class="tab-panel" role="tabpanel" aria-labelledby="finance-heading" hidden>
@@ -153,6 +192,10 @@
           <option value="metric" selected>Metric</option>
           <option value="leg">Leg</option>
         </select>
+        <label for="include-stops-checkbox" class="checkbox-label">
+          <input id="include-stops-checkbox" type="checkbox">
+          Include stops (loading, unloading, braking)
+        </label>
       </div>
 
       <div id="leg-breakdown-container"></div>

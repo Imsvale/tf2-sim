@@ -31,16 +31,22 @@ const CARGO_MASS_T = 1.2;
 // mathematically identical to summing one combined group, so this needs no
 // special handling for the positional model above.
 
+// color: null means "auto" — js/charts.js falls back to the train's position
+// in the list (see SERIES_SLOTS there). A number 0-7 pins it to that
+// specific --series-N slot regardless of position, via the train-strip
+// color picker in js/main.js.
 export function createTrain() {
-  return { locomotives: [], wagons: [], name: null };
+  return { locomotives: [], wagons: [], name: null, color: null };
 }
 
 /** Deep-copies a train's consist so the clone shares no mutable state with the original. Does NOT
- *  copy the source's custom name — two identically-labeled trains would be harder to tell apart
- *  in tables/charts than the default "Train N", so the clone starts unnamed. */
+ *  copy the source's custom name or chosen color — two identically-labeled, identically-colored
+ *  trains would be harder to tell apart in tables/charts than the defaults, so the clone starts
+ *  unnamed and auto-colored. */
 export function cloneTrain(train) {
   return {
     name: null,
+    color: null,
     locomotives: train.locomotives.map((item) => ({ ...item })),
     wagons: train.wagons.map((item) => ({ ...item })),
   };
@@ -103,6 +109,15 @@ export function aggregateTrain(train, vehicleById) {
   let cargoCapacity = 0;
   let topSpeed_kmh = Infinity;
   const locomotiveUnits = [];
+  // Per-group (not merged), same reasoning as locomotiveUnits above but for
+  // js/loading.js's load/unload-time math: a naive amount/Σ(loadingSpeed)
+  // overstates capacity the same way naive force-summing did, whenever
+  // wagons/MUs differ in capacity-to-loadingSpeed ratio. Covers both wagons
+  // and multiple-unit locomotives that carry passengers (capacity > 0) —
+  // both already count toward passengerCapacity below, so both need to be
+  // here too or a passenger-MU train's load/unload time would silently
+  // ignore its own capacity.
+  const loadUnits = [];
 
   for (const { vehicleId, quantity } of train.locomotives) {
     const v = vehicleById.get(vehicleId);
@@ -110,7 +125,10 @@ export function aggregateTrain(train, vehicleById) {
     power_kW += v.power_kW * quantity;
     tractiveEffort_kN += v.tractiveEffort_kN * quantity;
     price += v.price * quantity;
-    if (v.capacity > 0) passengerCapacity += v.capacity * quantity; // MU locomotives carry passengers
+    if (v.capacity > 0) {
+      passengerCapacity += v.capacity * quantity; // MU locomotives carry passengers
+      loadUnits.push({ capacity: v.capacity, loadingSpeed: v.loadingSpeed, count: quantity, isPassenger: true });
+    }
     topSpeed_kmh = Math.min(topSpeed_kmh, v.topSpeed_kmh);
     // Kept as separate per-type units (not summed) so physics.js can sum
     // each locomotive's own force-vs-speed curve rather than one combined
@@ -124,6 +142,7 @@ export function aggregateTrain(train, vehicleById) {
     price += v.price * quantity;
     if (v.isPassengerWagon) passengerCapacity += v.capacity * quantity;
     else cargoCapacity += v.capacity * quantity;
+    if (v.capacity > 0) loadUnits.push({ capacity: v.capacity, loadingSpeed: v.loadingSpeed, count: quantity, isPassenger: v.isPassengerWagon });
     topSpeed_kmh = Math.min(topSpeed_kmh, v.topSpeed_kmh);
   }
 
@@ -135,6 +154,7 @@ export function aggregateTrain(train, vehicleById) {
     power_kW,
     tractiveEffort_kN,
     locomotiveUnits,
+    loadUnits,
     topSpeed_kmh: Number.isFinite(topSpeed_kmh) ? topSpeed_kmh : 0,
     price,
     passengerCapacity,

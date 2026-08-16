@@ -18,7 +18,7 @@ import {
 import { createRoute, addStation, removeStation, estimateTrackDistance, effectiveTrackDistance } from "./route.js";
 import { computeAccelerationStats } from "./physics.js";
 import { DIFFICULTY_FACTORS, tripSummary } from "./finance.js";
-import { renderCharts, renderFinanceCharts } from "./charts.js";
+import { renderCharts, renderFinanceCharts, renderRouteProfileCharts, renderWholeRouteChart, SERIES_SLOTS, seriesColor } from "./charts.js";
 import { initChartGallery } from "./chartGallery.js";
 import { saveState, loadState } from "./storage.js";
 import { imageForVehicle } from "./images.js";
@@ -29,7 +29,10 @@ const state = {
   trains: [], // seeded by buildDefaultTrains() once vehicles are loaded, before loadState() is consulted
   route: createRoute(),
   trackSpeedLimit_kmh: 300,
+  brakingDeceleration_ms2: 2.5,
+  selectedLegIndex: 0,
   difficultyKey: "easy",
+  includeStopsInFinancials: false,
   accelerationDetail: "simple",
   financeGroupBy: "metric",
   chipView: "compact",
@@ -49,10 +52,14 @@ function trainLabel(train, index) {
   return train.name || `Train ${index + 1}`;
 }
 
+// colorSlot: the train's own explicit chart-color choice (a --series-N
+// index, see the color picker in buildTrainStripLabel) if set, else its
+// position in the list — same fallback js/charts.js used unconditionally
+// before per-train colors existed.
 function aggregatesWithLabels() {
   return state.trains.map((train, i) => {
     const aggregate = aggregateTrain(train, state.vehicleById);
-    return aggregate ? { aggregate, label: trainLabel(train, i) } : null;
+    return aggregate ? { aggregate, label: trainLabel(train, i), colorSlot: train.color ?? i } : null;
   });
 }
 
@@ -158,90 +165,20 @@ function positionPopoverNear(popover, anchorEl) {
   popover.style.top = `${top}px`;
 }
 
-// Popover is just Type + Quantity now — removal moved to the chip's own
-// inline ✕ (see renderChip), so there's no longer a second path for the
-// same action.
-function openVehiclePopover(anchorEl, { train, trainIndex, item, type, indexInType, vehicle, countEl }) {
-  closePopover();
-
-  const popover = document.createElement("div");
-  popover.className = "popover";
-
-  const name = document.createElement("div");
-  name.className = "popover-name";
-  name.textContent = vehicle.name;
-  popover.appendChild(name);
-
-  const typeRow = document.createElement("div");
-  typeRow.className = "popover-row";
-  const typeLabel = document.createElement("label");
-  typeLabel.textContent = "Type";
-  const typeSelect = document.createElement("select");
-  populateSelectOptions(typeSelect, type === "locomotive" ? locomotivesOf(state.vehicles) : wagonsOf(state.vehicles));
-  typeSelect.value = item.vehicleId;
-  typeSelect.addEventListener("change", () => {
-    const newVehicleId = typeSelect.value;
-    if (newVehicleId === item.vehicleId) return;
-    const setType = type === "locomotive" ? setLocomotiveTypeAt : setWagonTypeAt;
-    setType(train, indexInType, newVehicleId);
-    closePopover();
-    refreshTrainStrip(trainIndex);
-    recompute();
-  });
-  typeRow.append(typeLabel, typeSelect);
-  popover.appendChild(typeRow);
-
-  const qtyRow = document.createElement("div");
-  qtyRow.className = "popover-row";
-  const qtyLabel = document.createElement("label");
-  qtyLabel.textContent = "Quantity";
-  const qtyInput = document.createElement("input");
-  qtyInput.type = "number";
-  qtyInput.min = "1";
-  qtyInput.value = item.quantity;
-  qtyInput.addEventListener("change", () => {
-    const setQty = type === "locomotive" ? setLocomotiveQuantityAt : setWagonQuantityAt;
-    const newQty = Math.max(1, Math.floor(Number(qtyInput.value)) || 1);
-    setQty(train, indexInType, newQty); // mutates `item` in place (same object, this train's array at this index)
-    qtyInput.value = newQty;
-    countEl.textContent = `×${newQty}`;
-    recompute();
-  });
-  qtyRow.append(qtyLabel, qtyInput);
-  popover.appendChild(qtyRow);
-
-  document.body.appendChild(popover);
-  positionPopoverNear(popover, anchorEl);
-  openPopoverEl = popover;
-
-  const onDocClick = (e) => {
-    if (!popover.contains(e.target) && e.target !== anchorEl) closePopover();
-  };
-  const onKeydown = (e) => {
-    if (e.key === "Escape") closePopover();
-  };
-  const onScroll = () => closePopover();
-  document.addEventListener("click", onDocClick, true);
-  document.addEventListener("keydown", onKeydown);
-  window.addEventListener("scroll", onScroll, true);
-
-  closeOpenPopoverListeners = () => {
-    document.removeEventListener("click", onDocClick, true);
-    document.removeEventListener("keydown", onKeydown);
-    window.removeEventListener("scroll", onScroll, true);
-  };
-}
-
 // ---- train list (strips + chips) ----
 
 function renderChip(train, trainIndex, item, type, indexInType, vehicle, isLastInTrain) {
   const wrap = document.createElement("div");
   wrap.className = "chip-wrap";
 
-  const chip = document.createElement("button");
-  chip.type = "button";
+  // Not a <button> — it hosts two independently-interactive children (the
+  // type <select> below and the quantity stepper), which a <button> can't
+  // contain. The select's own visible :hover/:focus feedback (see css)
+  // stands in for a button's, so this is still keyboard/AT accessible.
+  const chip = document.createElement("div");
   chip.className = "chip";
-  chip.title = `${vehicle.name} — ${formatCompactSpec(vehicle)}`;
+  const tooltip = `${vehicle.name} — ${formatCompactSpec(vehicle)}`;
+  chip.title = tooltip;
 
   const img = document.createElement("img");
   img.className = "chip-img";
@@ -257,14 +194,30 @@ function renderChip(train, trainIndex, item, type, indexInType, vehicle, isLastI
     chip.appendChild(name);
   }
 
-  const count = document.createElement("span");
-  count.className = "chip-count";
-  count.textContent = `×${item.quantity}`;
-  chip.appendChild(count);
+  // Type is the only thing left to configure here (Quantity is the
+  // stepper below; Remove is the mini ✕) — so the chip can just open this
+  // <select> directly instead of a popover that only ever held one
+  // control. Invisible (opacity: 0 in css) but real and focusable; sized
+  // to cover the whole chip, but .chip-qty below wins the overlap (see its
+  // own comment in css — position+z-index, not just DOM order) so clicks
+  // there land on the stepper instead of passing through to this.
+  const typeSelect = document.createElement("select");
+  typeSelect.className = "chip-type-select";
+  typeSelect.title = tooltip; // hovering the select directly (most of the chip's area) should still show it, not just hovering .chip's own padding
+  typeSelect.setAttribute("aria-label", `${vehicle.name} type`);
+  populateSelectOptions(typeSelect, type === "locomotive" ? locomotivesOf(state.vehicles) : wagonsOf(state.vehicles));
+  typeSelect.value = item.vehicleId;
+  typeSelect.addEventListener("change", () => {
+    const newVehicleId = typeSelect.value;
+    if (newVehicleId === item.vehicleId) return;
+    const setType = type === "locomotive" ? setLocomotiveTypeAt : setWagonTypeAt;
+    setType(train, indexInType, newVehicleId);
+    refreshTrainStrip(trainIndex);
+    recompute();
+  });
+  chip.appendChild(typeSelect);
 
-  chip.addEventListener("click", () =>
-    openVehiclePopover(chip, { train, trainIndex, item, type, indexInType, vehicle, countEl: count })
-  );
+  chip.appendChild(buildChipQtyStepper(train, item, type, indexInType, vehicle));
 
   // Small per-group insert/remove controls, replacing the old strip-level
   // "add locomotive"/"add wagon" buttons — + inserts a clone of *this*
@@ -304,6 +257,77 @@ function renderChip(train, trainIndex, item, type, indexInType, vehicle, isLastI
   miniActions.append(addBtn, removeBtn);
 
   wrap.append(chip, miniActions);
+  return wrap;
+}
+
+// Compact quantity stepper, a direct child of .chip now (not a separate
+// popover field, not a sibling pill) — see renderChip. Stacked up/down
+// arrows on the trailing edge (rather than +/- flanking the input on each
+// side) — the leading "+" would sit right next to the mini-add button's
+// own "+" (a different action, insert a new group), so this avoids that
+// visual clash as well as just being more compact (see css .chip-qty).
+function buildChipQtyStepper(train, item, type, indexInType, vehicle) {
+  const setQty = type === "locomotive" ? setLocomotiveQuantityAt : setWagonQuantityAt;
+  const wrap = document.createElement("div");
+  wrap.className = "chip-qty";
+
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "1";
+  input.value = item.quantity;
+  input.setAttribute("aria-label", `${vehicle.name} quantity`);
+
+  const commit = (newQty) => {
+    newQty = Math.max(1, Math.floor(newQty) || 1);
+    setQty(train, indexInType, newQty); // mutates `item` in place (same object, this train's array at this index)
+    input.value = newQty;
+    recompute();
+  };
+
+  const arrows = document.createElement("div");
+  arrows.className = "chip-qty-arrows";
+
+  const upBtn = document.createElement("button");
+  upBtn.type = "button";
+  upBtn.className = "chip-qty-up";
+  upBtn.title = "Increase quantity";
+  upBtn.setAttribute("aria-label", `Increase ${vehicle.name} quantity`);
+  upBtn.addEventListener("click", () => commit(item.quantity + 1));
+
+  const downBtn = document.createElement("button");
+  downBtn.type = "button";
+  downBtn.className = "chip-qty-down";
+  downBtn.title = "Decrease quantity";
+  downBtn.setAttribute("aria-label", `Decrease ${vehicle.name} quantity`);
+  downBtn.addEventListener("click", () => commit(item.quantity - 1));
+
+  input.addEventListener("change", () => commit(Number(input.value)));
+
+  // Scroll wheel adjusts the value too: while just hovering (the direct
+  // listener below), or from anywhere on the page once the field is
+  // focused (the document-level listener, added/removed on focus/blur so
+  // it doesn't linger — and outlives neither the field's focus nor, via
+  // that, the chip itself). stopPropagation on the direct listener avoids
+  // double-stepping when both are active at once (hovering an already-
+  // focused field).
+  const step = (e) => {
+    e.preventDefault();
+    commit(item.quantity + (e.deltaY < 0 ? 1 : -1));
+  };
+  input.addEventListener(
+    "wheel",
+    (e) => {
+      step(e);
+      e.stopPropagation();
+    },
+    { passive: false }
+  );
+  const onDocumentWheel = (e) => step(e);
+  input.addEventListener("focus", () => document.addEventListener("wheel", onDocumentWheel, { passive: false }));
+  input.addEventListener("blur", () => document.removeEventListener("wheel", onDocumentWheel));
+
+  arrows.append(upBtn, downBtn);
+  wrap.append(input, arrows);
   return wrap;
 }
 
@@ -380,8 +404,92 @@ function buildTrainStripLabel(train, trainIndex) {
     input.select();
   });
 
-  wrap.append(label, renameBtn);
+  wrap.append(label, renameBtn, buildTrainColorButton(train, trainIndex));
   return wrap;
+}
+
+// Small swatch button showing this train's current chart color (its own
+// pinned --series-N slot if set, else its position in the list — same
+// fallback js/charts.js uses). Click opens a popover to pin one of the 8
+// validated palette slots, or revert to "Auto".
+function buildTrainColorButton(train, trainIndex) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "train-strip-color";
+  const currentSlot = () => train.color ?? trainIndex;
+  const refresh = () => {
+    btn.style.background = seriesColor(currentSlot());
+    btn.title = train.color != null ? "Chart color (pinned) — click to change" : "Chart color (auto) — click to pin";
+  };
+  refresh();
+  btn.setAttribute("aria-label", `Set chart color for ${trainLabel(train, trainIndex)}`);
+  btn.addEventListener("click", () => openTrainColorPopover(btn, train, refresh));
+  return btn;
+}
+
+function openTrainColorPopover(anchorEl, train, onChange) {
+  closePopover();
+
+  const popover = document.createElement("div");
+  popover.className = "popover";
+
+  const name = document.createElement("div");
+  name.className = "popover-name";
+  name.textContent = "Chart color";
+  popover.appendChild(name);
+
+  const swatchRow = document.createElement("div");
+  swatchRow.className = "popover-swatch-row";
+  for (let slot = 0; slot < SERIES_SLOTS; slot++) {
+    const swatch = document.createElement("button");
+    swatch.type = "button";
+    swatch.className = "popover-swatch";
+    swatch.style.background = seriesColor(slot);
+    swatch.setAttribute("aria-label", `Color ${slot + 1}`);
+    if (train.color === slot) swatch.classList.add("is-selected");
+    swatch.addEventListener("click", () => {
+      train.color = slot;
+      onChange();
+      closePopover();
+      recompute();
+    });
+    swatchRow.appendChild(swatch);
+  }
+  popover.appendChild(swatchRow);
+
+  const autoBtn = document.createElement("button");
+  autoBtn.type = "button";
+  autoBtn.className = "popover-swatch-auto";
+  autoBtn.textContent = "Auto (position in list)";
+  if (train.color == null) autoBtn.classList.add("is-selected");
+  autoBtn.addEventListener("click", () => {
+    train.color = null;
+    onChange();
+    closePopover();
+    recompute();
+  });
+  popover.appendChild(autoBtn);
+
+  document.body.appendChild(popover);
+  positionPopoverNear(popover, anchorEl);
+  openPopoverEl = popover;
+
+  const onDocClick = (e) => {
+    if (!popover.contains(e.target) && e.target !== anchorEl) closePopover();
+  };
+  const onKeydown = (e) => {
+    if (e.key === "Escape") closePopover();
+  };
+  const onScroll = () => closePopover();
+  document.addEventListener("click", onDocClick, true);
+  document.addEventListener("keydown", onKeydown);
+  window.addEventListener("scroll", onScroll, true);
+
+  closeOpenPopoverListeners = () => {
+    document.removeEventListener("click", onDocClick, true);
+    document.removeEventListener("keydown", onKeydown);
+    window.removeEventListener("scroll", onScroll, true);
+  };
 }
 
 function buildTrainStrip(trainIndex) {
@@ -683,9 +791,38 @@ function initRouteControls() {
   });
   custom.addEventListener("change", applyTrackSpeedLimit);
 
+  document.getElementById("braking-decel-input").addEventListener("change", (e) => {
+    const value = Number(e.target.value);
+    state.brakingDeceleration_ms2 = value > 0 ? value : 2.5;
+    e.target.value = state.brakingDeceleration_ms2;
+    recompute();
+  });
+
+  document.getElementById("route-leg-select").addEventListener("change", (e) => {
+    state.selectedLegIndex = Number(e.target.value);
+    recompute();
+  });
+
   document.getElementById("add-station-btn").addEventListener("click", () => {
     addStation(state.route);
     rebuildRoute();
+  });
+}
+
+// Rebuilds the leg <select>'s options from the current route (label via
+// legLabel(), so it always matches the route table's station names) and
+// clamps state.selectedLegIndex if the previously-selected leg no longer
+// exists (e.g. that station was removed). Called on every structural route
+// change (renderRoute) and on station rename, since legLabel() output
+// changes then too but nothing else currently triggers a rebuild for that.
+function renderLegSelect() {
+  const select = document.getElementById("route-leg-select");
+  const legCount = state.route.legs.length;
+  if (state.selectedLegIndex >= legCount) state.selectedLegIndex = 0;
+
+  select.innerHTML = "";
+  state.route.legs.forEach((_, i) => {
+    select.appendChild(new Option(legLabel(i), String(i), false, i === state.selectedLegIndex));
   });
 }
 
@@ -723,6 +860,7 @@ function renderRoute(aggregates) {
   state.route.stations.forEach((station, i) => {
     body.appendChild(buildRouteRow(station, i, aggregates));
   });
+  renderLegSelect();
 }
 
 function buildRouteRow(station, index, aggregates) {
@@ -735,6 +873,7 @@ function buildRouteRow(station, index, aggregates) {
   nameInput.value = station.name;
   nameInput.addEventListener("change", () => {
     station.name = nameInput.value || `Station ${index + 1}`;
+    renderLegSelect(); // leg labels (legLabel()) include station names
     saveState(state);
   });
   nameTd.appendChild(nameInput);
@@ -922,6 +1061,10 @@ function initFinanceControls() {
     state.financeGroupBy = e.target.value;
     recompute();
   });
+  document.getElementById("include-stops-checkbox").addEventListener("change", (e) => {
+    state.includeStopsInFinancials = e.target.checked;
+    recompute();
+  });
 }
 
 // Builds one <table class="compare-table"> (train columns via the existing
@@ -1029,7 +1172,12 @@ function renderTripSummary(summaries) {
 }
 
 function renderFinance(aggregates) {
-  const options = { trackSpeedLimit_kmh: state.trackSpeedLimit_kmh, difficulty: DIFFICULTY_FACTORS[state.difficultyKey] };
+  const options = {
+    trackSpeedLimit_kmh: state.trackSpeedLimit_kmh,
+    difficulty: DIFFICULTY_FACTORS[state.difficultyKey],
+    includeStops: state.includeStopsInFinancials,
+    brakingDeceleration_ms2: state.brakingDeceleration_ms2,
+  };
   const summaries = aggregates.map((entry) => (entry ? tripSummary(entry.aggregate, state.route, options) : null));
 
   renderLegBreakdown(summaries);
@@ -1040,7 +1188,7 @@ function renderFinance(aggregates) {
   // names get unwieldy fast as a chart category axis. Full names + distance
   // are still shown in the tables above (legLabel()/legLabelWithDistance()).
   const legLabels = state.route.legs.map((_, i) => String(i + 1));
-  const chartTrains = aggregates.map((entry, i) => (entry && summaries[i] ? { label: entry.label, summary: summaries[i] } : null));
+  const chartTrains = aggregates.map((entry, i) => (entry && summaries[i] ? { label: entry.label, summary: summaries[i], colorSlot: entry.colorSlot } : null));
   renderFinanceCharts(chartTrains, legLabels);
 }
 
@@ -1064,6 +1212,20 @@ function recompute() {
     renderAccelerationSection(aggregates);
     renderFinance(aggregates);
     renderCharts(aggregates, state.trackSpeedLimit_kmh);
+
+    const selectedLeg = state.route.legs[state.selectedLegIndex];
+    const legDistance_m = selectedLeg ? effectiveTrackDistance(selectedLeg) : null;
+    if (legDistance_m != null) {
+      renderRouteProfileCharts(aggregates, legDistance_m, {
+        trackSpeedLimit_kmh: state.trackSpeedLimit_kmh,
+        brakingDeceleration_ms2: state.brakingDeceleration_ms2,
+      });
+    }
+    renderWholeRouteChart(aggregates, state.route, {
+      trackSpeedLimit_kmh: state.trackSpeedLimit_kmh,
+      brakingDeceleration_ms2: state.brakingDeceleration_ms2,
+    });
+
     saveState(state);
   } catch (e) {
     console.error("Failed to update the page:", e);
@@ -1075,6 +1237,7 @@ function applyLoadedUIState() {
   document.getElementById("acceleration-detail-select").value = state.accelerationDetail;
   document.getElementById("difficulty-select").value = state.difficultyKey;
   document.getElementById("finance-group-by-select").value = state.financeGroupBy;
+  document.getElementById("include-stops-checkbox").checked = state.includeStopsInFinancials;
   document.getElementById("chip-view-select").value = state.chipView;
 
   const trackSelect = document.getElementById("track-speed-limit-select");
@@ -1090,6 +1253,7 @@ function applyLoadedUIState() {
     trackCustom.hidden = false;
     trackCustom.value = state.trackSpeedLimit_kmh;
   }
+  document.getElementById("braking-decel-input").value = state.brakingDeceleration_ms2;
 
   setActiveTab(state.activeTab);
 }

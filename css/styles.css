@@ -1,4 +1,9 @@
 :root {
+  /* Tells the browser which chrome (native spin buttons, checkboxes, etc.)
+     to draw form controls with — without this, number-input spin buttons
+     always render in light chrome regardless of the app's own theme,
+     which looks wrong (a bright white box) against a dark background. */
+  color-scheme: light;
   --bg: #f4f5f7;
   --bg-elevated: #ffffff;
   --text: #1c1f24;
@@ -28,6 +33,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #14171c;
     --bg-elevated: #1c2028;
     --text: #e7e9ec;
@@ -53,6 +59,7 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #14171c;
   --bg-elevated: #1c2028;
   --text: #e7e9ec;
@@ -306,6 +313,16 @@ button.primary {
   background: var(--row-alt);
 }
 
+.train-strip-color {
+  flex-shrink: 0;
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 50%;
+  padding: 0;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
 .train-strip-rename-input {
   font-weight: 600;
   min-width: 0;
@@ -368,21 +385,35 @@ button.primary {
 }
 
 .chip {
+  position: relative; /* anchors .chip-type-select's absolute inset:0 */
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.3rem 0.55rem;
+  padding: 0.3rem 0.3rem 0.3rem 0.55rem;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--row-alt);
   color: var(--text);
   font-size: 0.85rem;
   white-space: nowrap;
-  cursor: pointer;
 }
 
-.chip:hover {
+.chip:hover,
+.chip:focus-within {
   border-color: var(--accent);
+}
+
+/* Invisible but real <select> covering the chip — see renderChip. Sits
+   below .chip-qty in stacking (later DOM order + opaque), so clicks over
+   the stepper land there instead of passing through to this. */
+.chip-type-select {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
 }
 
 /* Small per-group insert (green +) / remove (red ✕) controls, stacked
@@ -448,8 +479,120 @@ button.primary {
   text-overflow: ellipsis;
 }
 
-.chip-count {
-  color: var(--text-muted);
+/* Compact quantity stepper, a sibling of .chip (not nested inside it — see
+   js/main.js's buildChipQtyStepper). Stacked up/down arrows on the
+   trailing edge replace the number input's native spinner (which is both
+   wider than this and, pre-color-scheme fix, could look inconsistent
+   across browsers/themes).
+
+   No overflow:hidden here (unlike most other pill/chip shapes in this
+   file) — the rounded-corner look instead comes from putting the
+   radius on the input's leading corners and the down-button's trailing
+   corner directly. overflow:hidden on the wrapper was clipping the
+   input's native focus outline down to a stray sliver at one edge; the
+   focus ring now lives on the wrapper itself (:focus-within, below),
+   which nothing clips.
+
+   position+z-index here are load-bearing, not decorative: a positioned
+   element (.chip-type-select, position:absolute) otherwise always paints
+   above a non-positioned sibling regardless of DOM order, which would let
+   the invisible select swallow clicks meant for this stepper. Being
+   explicitly positioned with a higher z-index is what makes this win
+   instead. */
+.chip-qty {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: stretch;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+
+.chip-qty:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.chip-qty input[type="number"] {
+  width: 1.6rem;
+  padding: 0 0 0 5px;
+  border: none;
+  border-radius: 5px 0 0 5px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 0.75rem;
+  text-align: left;
+  -moz-appearance: textfield;
+  outline: none; /* focus shown by the wrapper's box-shadow above instead */
+}
+
+.chip-qty input[type="number"]::-webkit-inner-spin-button,
+.chip-qty input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.chip-qty-arrows {
+  display: flex;
+  flex-direction: column;
+  width: 13px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+}
+
+.chip-qty-up,
+.chip-qty-down {
+  flex: 1;
+  padding: 0;
+  border: none;
+  background: var(--row-alt);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.chip-qty-up {
+  border-radius: 0 4px 0 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.chip-qty-down {
+  border-radius: 0 0 4px 0;
+}
+
+.chip-qty-up:hover,
+.chip-qty-down:hover {
+  background: var(--border);
+}
+
+/* CSS-drawn triangles instead of glyphs — crisp at this size regardless of
+   font/platform, unlike ▲/▼ which can render blurry or off-center this small. */
+.chip-qty-up::before,
+.chip-qty-down::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+}
+
+.chip-qty-up::before {
+  border-bottom: 3px solid var(--text-muted);
+}
+
+.chip-qty-down::before {
+  border-top: 3px solid var(--text-muted);
+}
+
+.chip-qty-up:hover::before {
+  border-bottom-color: var(--text);
+}
+
+.chip-qty-down:hover::before {
+  border-top-color: var(--text);
 }
 
 /* Popover — appended to document.body with position:fixed and positioned via
@@ -490,6 +633,43 @@ button.primary {
 .popover-row select {
   flex: 1;
   min-width: 0;
+}
+
+.popover-swatch-row {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.7rem;
+}
+
+.popover-swatch {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.popover-swatch:hover {
+  border-color: var(--text-muted);
+}
+
+.popover-swatch.is-selected {
+  border-color: var(--text);
+}
+
+.popover-swatch-auto {
+  width: 100%;
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  color: var(--text-muted);
+}
+
+.popover-swatch-auto.is-selected {
+  color: var(--text);
+  border-color: var(--text-muted);
+  font-weight: 600;
 }
 
 /* Charts */
@@ -684,6 +864,13 @@ body.chart-gallery-open {
   color: var(--text-muted);
 }
 
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
 #route-table input[type="text"] {
   width: 100%;
   min-width: 8rem;
@@ -717,6 +904,11 @@ body.chart-gallery-open {
 
 #add-station-btn {
   margin-top: 0.5rem;
+}
+
+#tab-route h3 {
+  font-size: 0.95rem;
+  margin: 2rem 0 0.5rem;
 }
 
 .finance-group {

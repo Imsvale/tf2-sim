@@ -75,6 +75,25 @@ function buildDynamics(aggregate) {
 const RK4_DT = 0.02; // seconds
 const MAX_STEPS = 300_000; // safety cap; real curves finish in a few thousand steps
 
+// One classic 4-stage Runge-Kutta step for dv/dt = accel(v), dd/dt = v, over
+// a caller-chosen step size — shared by simulate() and simulateToStop() so
+// the tableau itself isn't duplicated between them (they differ only in
+// how they choose `step` and when they stop).
+function rk4Step(v, step, accel) {
+  const k1v = accel(v);
+  const k1d = v;
+  const k2v = accel(v + (step / 2) * k1v);
+  const k2d = v + (step / 2) * k1v;
+  const k3v = accel(v + (step / 2) * k2v);
+  const k3d = v + (step / 2) * k2v;
+  const k4v = accel(v + step * k3v);
+  const k4d = v + step * k3v;
+  return {
+    dv: (step / 6) * (k1v + 2 * k2v + 2 * k3v + k4v),
+    dd: (step / 6) * (k1d + 2 * k2d + 2 * k3d + k4d),
+  };
+}
+
 /**
  * Simulate a train/vehicle accelerating from initialSpeed_kmh, stopping when
  * `stopAt` is satisfied (or once the effective top speed is reached and
@@ -126,17 +145,10 @@ export function simulate(aggregate, options) {
   // the stop condition is met first, whichever comes first.
   for (let i = 0; i < MAX_STEPS && v < effectiveTop && !reachedStopCondition(); i++) {
     const step = Math.min(RK4_DT, (effectiveTop - v) / Math.max(accel(v), 1e-6));
-    const k1v = accel(v);
-    const k1d = v;
-    const k2v = accel(v + (step / 2) * k1v);
-    const k2d = v + (step / 2) * k1v;
-    const k3v = accel(v + (step / 2) * k2v);
-    const k3d = v + (step / 2) * k2v;
-    const k4v = accel(v + step * k3v);
-    const k4d = v + step * k3v;
+    const { dv, dd } = rk4Step(v, step, accel);
 
-    v += (step / 6) * (k1v + 2 * k2v + 2 * k3v + k4v);
-    d += (step / 6) * (k1d + 2 * k2d + 2 * k3d + k4d);
+    v += dv;
+    d += dd;
     t += step;
 
     if (!vtCheckpoint && vt != null && v >= vt) vtCheckpoint = { t, d };
@@ -168,6 +180,95 @@ export function simulate(aggregate, options) {
     v95Checkpoint,
   };
   if (sample) result.samples = downsample(rawSamples, 200);
+  return result;
+}
+
+/**
+ * Simulate one leg door-to-door: accelerate from a standing start (same
+ * assumption legTime() already makes — trains fully stop at every
+ * station), cruise if the leg is long enough to reach effectiveTop, then
+ * brake to a full stop exactly at `distance_m`. Unlike simulate(), this
+ * always ends at v=0 — there's no "keep going past this point" case,
+ * since every leg ends at a station.
+ *
+ * Braking is modeled as a flat deceleration (not run through accel()/the
+ * taper — braking is a distinct game mechanic, not reduced engine power),
+ * so once braking starts it's closed-form: v²=2·a_brake·d_brake. The only
+ * numerically-interesting part is finding *where* braking must start,
+ * which this does by checking, at every accel/cruise step, "if I braked
+ * right now, would I stop by the station?" — the first step where that's
+ * true is where braking begins.
+ *
+ * @param {object} aggregate - see simulate()
+ * @param {number} distance_m - the leg's real (track) distance
+ * @param {object} options
+ * @param {number|null} [options.trackSpeedLimit_kmh=null]
+ * @param {number} options.brakingDeceleration_ms2 - flat, positive (e.g. 2.5)
+ * @param {boolean} [options.sample=false] - collect a downsampled
+ *   {t,v_kmh,d_m,phase} trajectory; phase is "run" (accelerating/cruising)
+ *   or "brake", so callers can render the two differently
+ * @returns {null|{warning:string}|object}
+ */
+export function simulateToStop(aggregate, distance_m, options) {
+  const dynamics = buildDynamics(aggregate);
+  if (!dynamics) return null;
+  if (dynamics.warning) return dynamics;
+
+  const { accel, ownTopSpeed } = dynamics;
+  const { trackSpeedLimit_kmh = null, brakingDeceleration_ms2, sample = false } = options;
+  const effectiveTop = trackSpeedLimit_kmh != null ? Math.min(ownTopSpeed, trackSpeedLimit_kmh / 3.6) : ownTopSpeed;
+
+  let v = 0;
+  let t = 0;
+  let d = 0;
+  const rawSamples = sample ? [{ t, v_kmh: 0, d_m: 0, phase: "run" }] : null;
+
+  for (let i = 0; i < MAX_STEPS && v < effectiveTop; i++) {
+    const brakeDistanceIfNow = (v * v) / (2 * brakingDeceleration_ms2);
+    if (d + brakeDistanceIfNow >= distance_m) break; // this step is where braking must start
+    const { dv, dd } = rk4Step(v, RK4_DT, accel);
+    v += dv;
+    d += dd;
+    t += RK4_DT;
+    if (sample) rawSamples.push({ t, v_kmh: v * 3.6, d_m: d, phase: "run" });
+  }
+
+  // The loop above can only exit by the braking trigger (v stays below
+  // effectiveTop) or by reaching effectiveTop first (long leg) — in the
+  // latter case, cruise for whatever distance remains before the brake
+  // point, at effectiveTop, before handing off to the braking phase below.
+  if (v >= effectiveTop) {
+    const brakeDistance = (effectiveTop * effectiveTop) / (2 * brakingDeceleration_ms2);
+    const cruiseDistance = Math.max(0, distance_m - d - brakeDistance);
+    t += cruiseDistance / effectiveTop;
+    d += cruiseDistance;
+    if (sample) rawSamples.push({ t, v_kmh: effectiveTop * 3.6, d_m: d, phase: "run" });
+  }
+
+  const brakeStart = { t, d, v };
+  const brakeTime = v / brakingDeceleration_ms2;
+  if (sample) {
+    const BRAKE_STEPS = 20;
+    for (let i = 1; i <= BRAKE_STEPS; i++) {
+      const bt = (brakeTime * i) / BRAKE_STEPS;
+      const bv = Math.max(0, v - brakingDeceleration_ms2 * bt);
+      const bd = d + v * bt - 0.5 * brakingDeceleration_ms2 * bt * bt;
+      rawSamples.push({ t: t + bt, v_kmh: bv * 3.6, d_m: bd, phase: "brake" });
+    }
+  }
+
+  const result = { totalTime_s: t + brakeTime, distance_m, brakeStart };
+  if (sample) {
+    // Downsample the run phase only — it's the one that can have
+    // thousands of RK4 steps on a long leg. The brake phase is always
+    // exactly BRAKE_STEPS points (cheap either way), and downsampling the
+    // two together could otherwise thin out the brake segment's shape on
+    // long legs, since a uniform stride over "thousands of run points +
+    // 20 brake points" mostly falls on run points.
+    const runSamples = downsample(rawSamples.filter((s) => s.phase === "run"), 200);
+    const brakeSamples = rawSamples.filter((s) => s.phase === "brake");
+    result.samples = runSamples.concat(brakeSamples);
+  }
   return result;
 }
 

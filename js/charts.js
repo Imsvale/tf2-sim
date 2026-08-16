@@ -1,4 +1,6 @@
-import { forceAtSpeed, accelerationAtSpeed, simulate } from "./physics.js";
+import { forceAtSpeed, accelerationAtSpeed, simulate, simulateToStop } from "./physics.js";
+import { stationHoldTime } from "./loading.js";
+import { effectiveTrackDistance } from "./route.js";
 import { formatMoneyCompact } from "./vehicles.js";
 
 // Chart.js and its zoom plugin are loaded globally via plain <script> tags
@@ -40,7 +42,7 @@ if (typeof Chart !== "undefined") {
 // falls back to a shared muted color rather than a generated hue; the
 // legend and hover tooltip (both show the label as text) carry identity
 // past that point, not color alone.
-const SERIES_SLOTS = 8;
+export const SERIES_SLOTS = 8;
 
 function themeColors() {
   const style = getComputedStyle(document.documentElement);
@@ -53,13 +55,23 @@ function themeColors() {
   };
 }
 
-// Two chart groups today: the 4 Physics line charts and the 5 Finance bar
-// charts (see LEG_CHART_METRICS below). js/chartGallery.js's prev/next
-// navigation stays confined to whichever group it was opened from — see
-// chartGroupOf().
+/** The actual (theme-resolved) color for a --series-N slot — used by js/main.js's per-train color picker so its swatches match the charts exactly. */
+export function seriesColor(slot) {
+  return themeColors().seriesColor(slot);
+}
+
+// Four chart groups today: the 4 Physics line charts, the 5 Finance bar
+// charts (see LEG_CHART_METRICS below), the 2 Route leg-profile charts
+// (see renderRouteProfileCharts), and the single whole-route chart (see
+// renderWholeRouteChart). js/chartGallery.js's prev/next navigation stays
+// confined to whichever group it was opened from — see chartGroupOf().
+// routeWhole is a single-chart group; prev/next within it is a harmless
+// no-op (wraps to itself).
 export const CHART_GROUPS = {
   physics: ["chart-force", "chart-acceleration", "chart-speed", "chart-distance", "chart-speed-distance"],
   finance: ["chart-leg-time", "chart-leg-speed", "chart-leg-revenue", "chart-leg-maintenance", "chart-leg-profit"],
+  route: ["chart-route-speed-distance", "chart-route-speed-time"],
+  routeWhole: ["chart-route-whole"],
 };
 
 export function chartGroupOf(chartId) {
@@ -77,6 +89,9 @@ export const CHART_TITLES = {
   "chart-leg-revenue": "Revenue per Leg",
   "chart-leg-maintenance": "Maintenance per Leg",
   "chart-leg-profit": "Profit per Leg",
+  "chart-route-speed-distance": "Leg Profile — Speed vs Distance",
+  "chart-route-speed-time": "Leg Profile — Speed vs Time",
+  "chart-route-whole": "Whole Route — Speed over Time",
 };
 
 const LEG_CHART_METRICS = [
@@ -124,6 +139,13 @@ export function renderChartInto(canvas, config, { zoomEnabled = false } = {}) {
             pointHoverRadius: 4,
             borderWidth: 2,
             tension: 0.15,
+            // Route leg-profile charts split each train into a solid
+            // "run" segment and a dashed "brake" segment sharing the same
+            // color (see renderRouteProfileCharts) — dashed marks the
+            // brake portion, hideFromLegend keeps it from adding a
+            // redundant second legend entry for the same train.
+            borderDash: ds.dashed ? [6, 4] : undefined,
+            hideFromLegend: ds.legendHidden ?? false,
           };
         }),
       };
@@ -171,8 +193,10 @@ export function renderChartInto(canvas, config, { zoomEnabled = false } = {}) {
       plugins: {
         // Legend click-to-toggle series visibility is Chart.js's default
         // behavior (not configured here) — intentional, doubles as the
-        // "selective show/hide" for readability with more trains.
-        legend: { labels: { color: colors.text } },
+        // "selective show/hide" for readability with more trains. The
+        // filter hides any dataset marked hideFromLegend (a train's
+        // dashed brake-segment twin — see the line-dataset mapping above).
+        legend: { labels: { color: colors.text, filter: (item, chartData) => !chartData.datasets[item.datasetIndex]?.hideFromLegend } },
         tooltip: { mode: interactionMode, axis: interactionAxis, intersect: false },
         zoom: zoomEnabled
           ? {
@@ -213,10 +237,10 @@ function sampleOverSpeed(aggregate, fn, maxSpeed_kmh) {
 }
 
 /**
- * @param {Array<{aggregate: object, label: string}|null>} trains - any number of slots;
- *   a train's color is its position in this array, so removing an earlier
- *   train will shift later trains' colors (no stable per-train id exists
- *   to prevent that — acceptable for this app's scale).
+ * @param {Array<{aggregate: object, label: string, colorSlot: number}|null>} trains - any
+ *   number of slots; colorSlot is the train's own explicit --series-N choice if the user set
+ *   one (js/main.js's train-strip color picker), else its position in this array — so an
+ *   unpinned train's color still shifts if an earlier train is removed, but a pinned one won't.
  * @param {number|null} trackSpeedLimit_kmh
  */
 export function renderCharts(trains, trackSpeedLimit_kmh) {
@@ -226,9 +250,10 @@ export function renderCharts(trains, trackSpeedLimit_kmh) {
   const distanceDatasets = [];
   const speedDistanceDatasets = [];
 
-  trains.forEach((train, seriesIndex) => {
+  trains.forEach((train, arrayIndex) => {
     if (!train) return;
     const { aggregate, label } = train;
+    const seriesIndex = train.colorSlot ?? arrayIndex;
 
     forceDatasets.push({ label, seriesIndex, points: sampleOverSpeed(aggregate, forceAtSpeed, aggregate.topSpeed_kmh) });
     accelDatasets.push({ label, seriesIndex, points: sampleOverSpeed(aggregate, accelerationAtSpeed, aggregate.topSpeed_kmh) });
@@ -253,18 +278,101 @@ export function renderCharts(trains, trackSpeedLimit_kmh) {
 }
 
 /**
- * @param {Array<{label: string, summary: object}|null>} trains - any number of
- *   slots, same seriesIndex-by-position convention as renderCharts(); `summary`
- *   is a js/finance.js tripSummary() result (uses only its `.legs` array here).
+ * @param {Array<{label: string, summary: object, colorSlot: number}|null>} trains - any number
+ *   of slots, same colorSlot-vs-position convention as renderCharts(); `summary` is a
+ *   js/finance.js tripSummary() result (uses only its `.legs` array here).
  * @param {string[]} legLabels - one label per leg, in route order (e.g. "A → B").
  */
 export function renderFinanceCharts(trains, legLabels) {
   for (const metric of LEG_CHART_METRICS) {
     const datasets = [];
-    trains.forEach((train, seriesIndex) => {
+    trains.forEach((train, arrayIndex) => {
       if (!train) return;
+      const seriesIndex = train.colorSlot ?? arrayIndex;
       datasets.push({ label: train.label, seriesIndex, data: train.summary.legs.map((leg) => leg[metric.key]) });
     });
     renderCardChart(metric.id, { type: "bar", xLabels: legLabels, yLabel: metric.yLabel, isMoney: metric.isMoney, datasets });
   }
+}
+
+/**
+ * One selected leg's full door-to-door profile (accelerate/cruise, then
+ * brake to a stop) for every train — js/physics.js's simulateToStop().
+ * Each train gets two datasets sharing one seriesIndex/color: a solid
+ * "run" segment and a dashed, legend-hidden "brake" segment, so the two
+ * charts visibly show where braking starts without adding new colors or
+ * legend clutter.
+ *
+ * @param {Array<{aggregate: object, label: string, colorSlot: number}|null>} trains
+ * @param {number} distance_m - the selected leg's real (track) distance
+ * @param {{trackSpeedLimit_kmh: number|null, brakingDeceleration_ms2: number}} options
+ */
+export function renderRouteProfileCharts(trains, distance_m, options) {
+  const distanceDatasets = [];
+  const timeDatasets = [];
+
+  trains.forEach((train, arrayIndex) => {
+    if (!train) return;
+    const seriesIndex = train.colorSlot ?? arrayIndex;
+    const result = simulateToStop(train.aggregate, distance_m, { ...options, sample: true });
+    if (!result || result.warning) return;
+
+    const runSamples = result.samples.filter((s) => s.phase === "run");
+    const brakeSamples = result.samples.filter((s) => s.phase === "brake");
+    // Include the last run sample as the brake segment's starting point too,
+    // so the dashed segment visually connects to the solid one with no gap.
+    const brakeWithJoin = runSamples.length ? [runSamples[runSamples.length - 1], ...brakeSamples] : brakeSamples;
+
+    distanceDatasets.push({ label: train.label, seriesIndex, points: runSamples.map((s) => ({ x: s.d_m, y: s.v_kmh })) });
+    distanceDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: brakeWithJoin.map((s) => ({ x: s.d_m, y: s.v_kmh })) });
+
+    timeDatasets.push({ label: train.label, seriesIndex, points: runSamples.map((s) => ({ x: s.t, y: s.v_kmh })) });
+    timeDatasets.push({ seriesIndex, dashed: true, legendHidden: true, points: brakeWithJoin.map((s) => ({ x: s.t, y: s.v_kmh })) });
+  });
+
+  renderCardChart("chart-route-speed-distance", { xLabel: "Distance (m)", yLabel: "Speed (km/h)", datasets: distanceDatasets });
+  renderCardChart("chart-route-speed-time", { xLabel: "Time (s)", yLabel: "Speed (km/h)", datasets: timeDatasets });
+}
+
+/**
+ * The entire loop, every leg back to back, for every train: accelerate,
+ * cruise, brake to a stop (simulateToStop, same as renderRouteProfileCharts)
+ * then a flat "stopped" segment for that station's loading+unloading dwell
+ * (js/loading.js's stationHoldTime, using that leg's own load factor — see
+ * js/finance.js's tripSummary() for why the leg's own factor governs both
+ * ends of its own load), before the next leg's samples continue from the
+ * cumulative time so far. One continuous line per train.
+ *
+ * @param {Array<{aggregate: object, label: string, colorSlot: number}|null>} trains
+ * @param {object} route - js/route.js route (stations/legs)
+ * @param {{trackSpeedLimit_kmh: number|null, brakingDeceleration_ms2: number}} options
+ */
+export function renderWholeRouteChart(trains, route, options) {
+  const datasets = [];
+
+  trains.forEach((train, arrayIndex) => {
+    if (!train) return;
+    const seriesIndex = train.colorSlot ?? arrayIndex;
+    const points = [];
+    let cumulativeT = 0;
+
+    for (const leg of route.legs) {
+      const distance_m = effectiveTrackDistance(leg);
+      if (distance_m == null) return;
+      const result = simulateToStop(train.aggregate, distance_m, { ...options, sample: true });
+      if (!result || result.warning) return;
+
+      result.samples.forEach((s) => points.push({ x: cumulativeT + s.t, y: s.v_kmh }));
+      cumulativeT += result.totalTime_s;
+
+      const hold = stationHoldTime(train.aggregate, leg.loadFactor);
+      points.push({ x: cumulativeT, y: 0 });
+      points.push({ x: cumulativeT + hold.holdTime_s, y: 0 });
+      cumulativeT += hold.holdTime_s;
+    }
+
+    datasets.push({ label: train.label, seriesIndex, points });
+  });
+
+  renderCardChart("chart-route-whole", { xLabel: "Time (s)", yLabel: "Speed (km/h)", datasets });
 }

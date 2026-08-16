@@ -1,4 +1,6 @@
 import { legTime, effectiveTrackDistance } from "./route.js";
+import { simulateToStop } from "./physics.js";
+import { stationHoldTime } from "./loading.js";
 
 // Implements docs/revenue_formulas.md and docs/cost_formulas.md directly.
 // Rail only for now (basePrice formula) — see TODO.md for road/air/water.
@@ -47,20 +49,42 @@ export function annualMaintenance(aggregate) {
  * Full trip summary across every leg of a route, for one train aggregate.
  * Returns null if any leg is missing its crow distance, or the train can't
  * move (no locomotives / power).
+ *
+ * `includeStops` (default false, unchanged legacy behavior when omitted):
+ * when true, each leg's time/maintenance also account for braking into
+ * the station and the loading/unloading dwell there (see js/loading.js),
+ * at 40% of the normal maintenance rate while stopped. `brakingDeceleration_ms2`
+ * is required when includeStops is true. Revenue is unaffected either way
+ * — legRevenue() was never time-based.
  */
-export function tripSummary(aggregate, route, { trackSpeedLimit_kmh, difficulty, yearBasis = "standard" }) {
+export function tripSummary(aggregate, route, { trackSpeedLimit_kmh, difficulty, yearBasis = "standard", includeStops = false, brakingDeceleration_ms2 }) {
   if (!aggregate || aggregate.power_kW === 0) return null;
 
   const yearSeconds = yearBasis === "average" ? REAL_SECONDS_PER_GAME_YEAR_AVG : REAL_SECONDS_PER_GAME_YEAR;
   const maintenanceRate = annualMaintenance(aggregate) / yearSeconds; // $ per second, constant regardless of leg
+  const STOPPED_MAINTENANCE_FACTOR = 0.4;
 
   const legs = [];
   for (const leg of route.legs) {
-    const time_s = legTime(aggregate, leg, trackSpeedLimit_kmh);
-    const revenue = legRevenue(aggregate, leg, { difficulty });
-    if (time_s == null || revenue == null) return null;
     const distance_m = effectiveTrackDistance(leg);
-    const maintenance = maintenanceRate * time_s;
+    if (distance_m == null) return null;
+
+    let time_s, maintenance;
+    if (includeStops) {
+      const result = simulateToStop(aggregate, distance_m, { trackSpeedLimit_kmh, brakingDeceleration_ms2 });
+      if (!result || result.warning) return null;
+      const hold = stationHoldTime(aggregate, leg.loadFactor);
+      time_s = result.totalTime_s + hold.holdTime_s;
+      maintenance = maintenanceRate * result.totalTime_s + maintenanceRate * STOPPED_MAINTENANCE_FACTOR * hold.holdTime_s;
+    } else {
+      time_s = legTime(aggregate, leg, trackSpeedLimit_kmh);
+      if (time_s == null) return null;
+      maintenance = maintenanceRate * time_s;
+    }
+
+    const revenue = legRevenue(aggregate, leg, { difficulty });
+    if (revenue == null) return null;
+
     legs.push({
       time_s,
       distance_m,

@@ -1,16 +1,18 @@
 # TF2 Sim — Roadmap
 
-Current state: build any number of named, cloneable trains (locomotive(s) +
-wagons, real game data and artwork) as horizontal strips of image chips with
-inline insert/remove controls, compare aggregate specs on the Trains tab,
-their derived acceleration stats and 4 comparison graphs (force/accel vs.
-speed, speed/distance vs. time — with hover tooltips, legend-click show/hide,
-and a maximize/fullscreen/zoom gallery) on the Physics tab, define a
-multi-station **looped** route (name/distance/track distance/load % per
-stop, plus a global track speed limit) on the Route tab, and see per-leg +
-trip-total financials (revenue, maintenance, profit, profit/hour,
-profit/game-year) for the full loop on the Finances tab. Everything
-persists to localStorage across refreshes. Light/dark theme throughout.
+Current state: build any number of named, cloneable, individually-colored
+trains (locomotive(s) + wagons, real game data and artwork) as horizontal
+strips of image chips with inline insert/remove controls, compare aggregate
+specs on the Trains tab, their derived acceleration stats and 5 comparison
+graphs (force/accel vs. speed, speed/distance vs. time, speed vs. distance —
+with hover tooltips, legend-click show/hide, and a maximize/fullscreen/zoom
+gallery) on the Physics tab, define a multi-station **looped** route
+(name/distance/track distance/load % per stop, a global track speed limit
+and braking deceleration, and a per-leg speed/braking profile graph) on the
+Route tab, and see per-leg + trip-total financials (revenue, maintenance,
+profit, profit/hour, profit/game-year) for the full loop on the Finances
+tab. Everything persists to localStorage across refreshes. Light/dark theme
+throughout.
 
 ## Vehicle data
 - [x] Import real vehicle data (`data/Locos.csv`, `data/Wagons.csv`), convert
@@ -69,8 +71,6 @@ persists to localStorage across refreshes. Light/dark theme throughout.
       tab — decided when discussing the tab layout, see below.
 - [ ] Aircraft acceleration model (thrust-based — distinct from rail's
       tractive-effort model)
-- [ ] Curve/gradient resistance — out of scope per current design (flat,
-      straight track only)
 
 ## Train building
 - [x] "Add locomotive" / "Add wagon" per train, any number of trains, laid
@@ -84,10 +84,44 @@ persists to localStorage across refreshes. Light/dark theme throughout.
       boxcars)
 - [x] Vehicles collapse to chips showing real vehicle artwork (`img/`,
       Flaticon, see CREDITS.md), native tooltip shows full name + compact
-      specs, click to open a popover (type, quantity). A trailing
+      specs, click to open a popover (type only, see below). A trailing
       locomotive auto-mirrors to face outward (`js/images.js`,
       `.chip-img--flipped`). A "Compact / Detailed" toggle switches all
       chips to also show the name inline
+  - [x] Quantity lives directly on the chip now, as a compact `[n]▲▼`
+        stepper (`buildChipQtyStepper()` in `js/main.js`) — no popover
+        step needed to change it. Stacked up/down arrows on the trailing
+        edge, not +/- flanking each side — a leading "+" would've sat
+        right next to the mini-add button's own "+" (a different action,
+        insert a new group), and stacked arrows are more compact besides
+  - [x] Fixed a focus glitch on the quantity input: `.chip-qty`'s
+        `overflow: hidden` (used to clip the flanking buttons into a
+        pill shape) was clipping the input's native focus outline down to
+        a stray sliver at one edge. Rebuilt the pill shape from explicit
+        per-corner `border-radius` instead (no `overflow:hidden` needed),
+        and moved the focus indicator to the pill itself
+        (`:focus-within` + `box-shadow`, with the input's own native
+        outline suppressed) so there's nothing left for anything to clip
+  - [x] The quantity value is also scroll-wheel adjustable — hovering the
+        field steps it directly, and once it's focused, scrolling anywhere
+        on the page does too (a document-level listener added on focus and
+        removed on blur, so it doesn't linger once the field isn't active;
+        `stopPropagation` on the direct hover listener avoids double-
+        stepping when both apply at once)
+  - [x] The chip itself is a `<div>` now, not a `<button>` — it hosts two
+        independently-interactive children (the quantity stepper above,
+        and a `<select>` covering the rest of it), and a `<button>` can't
+        contain other interactive controls. Since Type was the only field
+        left in the vehicle popover once Quantity moved out, that popover
+        is gone entirely — the invisible `<select>` opens directly on
+        click, styled to stay visually identical to the old chip button
+        (`.chip-type-select`, `opacity: 0`, `position: absolute; inset: 0`
+        — real and focusable, just not painted). It sits *underneath* the
+        quantity stepper in click-priority despite covering the whole
+        chip: an absolutely-positioned element normally wins pointer
+        events over a non-positioned sibling regardless of DOM order, so
+        `.chip-qty` needs its own explicit `position: relative; z-index:
+        1` to correctly take priority over the select in its own area
 - [x] Small green +/red ✕ controls beside each chip insert a group after
       that position / remove that group. + clones the chip it's on (same
       vehicle type and quantity), not a generic default — a duplicated
@@ -126,10 +160,17 @@ persists to localStorage across refreshes. Light/dark theme throughout.
 - [ ] Drag-and-drop reordering of vehicles within a train — purely cosmetic
       (order doesn't affect any computation; the insert-after mini-buttons
       cover the main reordering need already), deferred as low-priority polish
-- [ ] A train's chart/table color follows its position in the list, not a
-      stable per-train identity — removing an earlier train shifts later
-      trains' colors. Would need a stable id per train to fix; not worth the
-      complexity yet at this app's scale
+- [x] A train's chart color can be pinned to one of the 8 validated
+      `--series-*` slots via a small swatch button next to its rename icon
+      (`train.color`, `buildTrainColorButton`/`openTrainColorPopover` in
+      `js/main.js`) — reuses the same popover plumbing and the same colors
+      already defined for the charts (`SERIES_SLOTS`/`seriesColor()`,
+      newly exported from `js/charts.js`), so there's exactly one place
+      the 8 colors are defined. Persists (`js/storage.js`); resets to
+      "Auto" on clone, same reasoning as the name reset. A train left on
+      "Auto" still follows its position in the list (unchanged behavior),
+      but a pinned train now keeps its color regardless of what's added,
+      removed, or reordered around it
 
 ## Route & track
 - [x] Multi-station **looped** route: N stations, N legs — `legs[i]` is the
@@ -200,25 +241,52 @@ persists to localStorage across refreshes. Light/dark theme throughout.
         confined to whichever group it was opened from
         (`CHART_GROUPS`/`chartGroupOf()` in `js/charts.js`)
 - [ ] Profit-over-time graph, once a financial simulation (below) exists
-- [ ] Route graphs: acceleration and speed curves over each leg's actual
-      distance (using the leg's track distance when given, per
-      `js/route.js`), one graph set per leg rather than the current
-      unbounded-distance curves. Needs to include braking before the
-      station at the end of the leg, which needs two new pieces of
-      physics not modeled at all today:
-  - A single global braking deceleration parameter (vanilla TF2 default is
-        a flat -2.5 m/s², but make it user-customizable, similar to the
-        existing track speed limit setting)
-  - Given the train's speed at any point along the leg, the braking
-        distance/time needed to reach 0 (or the next speed limit) by the
-        station — straightforward with a flat deceleration (basic
-        kinematics, `v²=u²+2as`) but combining that with the existing
-        taper-based acceleration curve to find *where* along the leg
-        braking must start is the part worth double-checking once
-        underway
-  - Reference for other potentially interesting mechanics to explore:
-        Steam Workshop mods 3454209257 and 3238328414 (files under the
-        Workshop folder in the user's SteamLibrary on the S: drive)
+- [x] Route graphs: each train's full door-to-door profile for one
+      selected leg — accelerate, cruise if the leg's long enough, then
+      **brake to a stop at the station**, plotted as Speed vs Distance and
+      Speed vs Time (`chart-route-speed-distance`/`-time`, a third
+      `CHART_GROUPS` entry in `js/charts.js`, gallery-enabled like the
+      others). Lives on the Route tab: a "Leg" `<select>`
+      (`state.selectedLegIndex`, `renderLegSelect()` in `js/main.js`,
+      rebuilt on route structure changes and station rename) picks which
+      leg to show, rather than a permanently-stacked chart-grid per leg.
+  - [x] New global, user-customizable braking deceleration
+        (`state.brakingDeceleration_ms2`, default 2.5 m/s² to match
+        vanilla, a number input on the Route tab next to the track speed
+        limit)
+  - [x] New `simulateToStop()` in `js/physics.js`: runs the same
+        accel/cruise stepping as `simulate()` (the RK4 tableau itself was
+        factored out into a shared `rk4Step()` helper so it isn't
+        duplicated), but at every step checks "if braking started right
+        now, would the train stop by the station?" (`v² = 2·a_brake·d`,
+        exact for a flat deceleration) — the first step where that's true
+        is where braking begins. The braking phase itself is closed-form
+        from there. Verified against real vehicle data: long legs reach
+        cruise and brake starting exactly where the kinematics predict;
+        short legs brake mid-acceleration without ever reaching cruise;
+        every case lands at the leg's real distance with speed ≈ 0
+  - [x] Each train's line is split into a solid "run" segment and a
+        dashed, legend-hidden "brake" segment sharing one color/legend
+        entry (`renderRouteProfileCharts()` in `js/charts.js`, new
+        `dashed`/`legendHidden` dataset options on `renderChartInto()`) —
+        shows where braking starts without a separate annotation plugin
+  - [x] Reference for other potentially interesting mechanics to explore
+        later: Steam Workshop mods 3454209257 and 3238328414 (files under
+        the Workshop folder in the user's SteamLibrary on the S: drive)
+  - **Scope note (superseded — see "Whole-route timing" below):** this
+        was originally additive/visual only, with `tripSummary()`
+        unchanged. It's since been wired into financials too, behind an
+        explicit "Include stops" toggle on the Finances tab (default off,
+        so nothing changes unless it's turned on) — see Financial features
+- [x] Whole-route graph: every leg back to back for the entire loop,
+      accelerate/cruise/brake per leg (reusing `simulateToStop()`) with a
+      flat "stopped" segment at each station for that stop's loading +
+      unloading dwell (see "Whole-route timing" under Financial features)
+      — one continuous Speed-over-Time line per train covering the full
+      route (`chart-route-whole`, its own single-chart `CHART_GROUPS`
+      entry, `renderWholeRouteChart()` in `js/charts.js`). Lives on the
+      Route tab below the per-leg Leg Profile section; no leg selector
+      needed since it always shows the whole loop
 
 ## Financial features
 - [x] Per-leg and trip-total revenue, maintenance, profit, profit/real-hour,
@@ -264,12 +332,59 @@ persists to localStorage across refreshes. Light/dark theme throughout.
 - [x] Load factor (capacity utilization) override, defaults to 100% — now
       per-leg, set on the Route tab (see "Route & track" above), not a
       single global value on this tab
+- [x] Whole-route timing: loading/unloading dwell time and stop-aware
+      maintenance accrual (was the "operating/parked-at-station state
+      model" item below — done, not just parked/depot rates but the
+      actual per-stop load/unload duration too). New `js/loading.js`:
+  - `loadUnloadTime(units, targetAmount)` — **not** a naive
+        `amount/Σ(loadingSpeed)`. That shortcut is only exact when every
+        active wagon/MU shares the same capacity-to-loadingSpeed ratio;
+        the real vehicle data doesn't (loadingSpeed 1-4, capacity 4-33,
+        independently), so a wagon with a smaller ratio saturates first,
+        drops out of the pool, and the combined rate for the rest falls
+        below Σ(loadingSpeed) — same category of bug as naively summing
+        locomotive power/TE, fixed the same way (piecewise, per-unit, not
+        pre-summed). Verified: matches the naive formula exactly below
+        saturation and for equal-ratio consists, exceeds it once a wagon
+        saturates, and resolves to `max(capacity/loadingSpeed)` at 100%
+        load with mismatched wagons
+  - `stationHoldTime(aggregate, loadFactor)` — passenger and cargo load in
+        parallel (different wagons/doors), so hold time is
+        `max(passengerTime, cargoTime)`, not their sum. `loadFactor` is
+        *that leg's own* load factor: since it represents how full the
+        train is on that leg, it governs both the boarding at the leg's
+        start and the disembarking at the leg's end, so load time and
+        unload time come out identical — confirmed this also means every
+        leg's time is self-contained (no need to reference neighboring
+        legs), and summing it over the whole loop covers each station's
+        loading once (as the leg departing it) and unloading once (as the
+        leg arriving there) — the "split at the boundary between
+        unloading and loading" convention, with no double-counting
+  - `js/train.js`'s `aggregateTrain()` gained a `loadUnits` array (same
+        per-group-not-merged pattern as `locomotiveUnits`) covering both
+        wagons and multiple-unit locomotives that carry passengers (17 in
+        the data have capacity > 0 — previously not tracked per-unit
+        anywhere)
+  - New "Include stops (loading, unloading, braking)" checkbox on the
+        Finances tab (`state.includeStopsInFinancials`, default off — see
+        below), which is also what turns on braking-aware leg time here
+        (via `simulateToStop()`) — "including stops" naturally means
+        including the deceleration into them too
+  - Maintenance during a stop only accrues at 40% of the normal rate
+        (`js/finance.js`'s `tripSummary()`, `STOPPED_MAINTENANCE_FACTOR`)
+- [x] "Include stops" toggle (`js/finance.js`'s `tripSummary(...,
+      {includeStops, brakingDeceleration_ms2})`) — off (default): byte-
+      identical to the pre-existing travel-only model, verified by
+      regression trace. On: per-leg time becomes braking-inclusive travel
+      + loading + unloading (see "Whole-route timing" above), which flows
+      through unchanged into `totalTime_s`, `profitPerRealHour`,
+      `profitPerGameYear` — those already just consume whatever time/
+      maintenance each leg reports. Revenue is untouched either way
+      (`legRevenue()` was never time-based)
 - [ ] Financial simulation over time (e.g. accumulate profit, optionally buy
       more wagons/vehicles as money allows)
 - [ ] Loan/interest, once wired in (see "Game formulas" above for where its
       UI belongs)
-- [ ] Maintenance cost accrual with an operating/parked-at-station state
-      model (currently always the full operating rate)
 
 ## Persistence
 - [x] Full app state (trains, route incl. per-leg load factor, track speed
@@ -290,6 +405,11 @@ persists to localStorage across refreshes. Light/dark theme throughout.
       had a color rule, which happened to cover most links but missed the
       one in the Physics tab's acceleration hint; now global, and the
       redundant footer-specific rule was removed
+- [x] Native form-control chrome (mainly number-input spin buttons) now
+      respects the app's theme via the CSS `color-scheme` property (set
+      alongside the existing light/dark token blocks in css/styles.css) —
+      without it, every spin button rendered in light browser chrome
+      (a bright box) regardless of the app's own dark mode
 - [ ] GitHub Actions deploy workflow if the project ever needs a build step
       (not needed yet — plain static site deploys directly)
 - [ ] Accessibility pass on the tab/chip/popover UI (tabs and popovers use

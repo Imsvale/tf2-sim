@@ -8,9 +8,11 @@ explanation and experimental verification. The `T`/`D` integrals below were
 independently re-derived from `m·dv/dt = F_drive − R` and match the extracted
 formulas exactly, so this can be treated as verified, not just transcribed.
 
-Applies to **flat, straight track** — no gradient or curve resistance is
-modeled. Rail only; road/air/water would need different resistance and
-propulsion models.
+Applies to **flat track** — no gradient (slope) resistance is modeled.
+Curves aren't a resistance mechanic in TF2 at all — they just impose a
+lower speed limit, not a drag force — so there's nothing curve-related to
+model here beyond speed limits. Rail only; road/air/water would need
+different resistance and propulsion models.
 
 **Multiple locomotives:** everything below is written for a single
 locomotive's `P`/`F_TE`. For a train with more than one locomotive *type*,
@@ -225,7 +227,11 @@ time/distance to 95% of top speed alongside it, which is a more
 
 ## Open questions / not yet modeled
 
-- Gradient and curve resistance (flat straight track only, for now).
+- Gradient (slope) resistance — not curves, which aren't a resistance
+  mechanic in-game, only a speed-limit one. On a slope, gravity is no
+  longer orthogonal to the direction of travel, so it contributes a
+  resistance/assist term, and rolling resistance presumably scales with
+  the (now slightly reduced) normal force too. Not modeled; low priority.
 - Braking (only acceleration is modeled here).
 - Non-zero `V_0` distance accuracy (see Phase 1 caveat).
 - Non-rail vehicle types (road/air/water use different propulsion/resistance

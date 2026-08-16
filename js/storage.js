@@ -71,6 +71,15 @@ export function loadState(vehicleById) {
   if (parsed.trackSpeedLimit_kmh === null || (typeof parsed.trackSpeedLimit_kmh === "number" && parsed.trackSpeedLimit_kmh > 0)) {
     state.trackSpeedLimit_kmh = parsed.trackSpeedLimit_kmh;
   }
+  if (typeof parsed.brakingDeceleration_ms2 === "number" && parsed.brakingDeceleration_ms2 > 0) {
+    state.brakingDeceleration_ms2 = parsed.brakingDeceleration_ms2;
+  }
+  // Out-of-range (e.g. that leg's station got removed) is self-healed by
+  // js/main.js's renderLegSelect(), which clamps it back to 0 on render —
+  // no need to cross-reference the reconstructed route's leg count here too.
+  if (Number.isInteger(parsed.selectedLegIndex) && parsed.selectedLegIndex >= 0) {
+    state.selectedLegIndex = parsed.selectedLegIndex;
+  }
   if (["easy", "medium", "hard", "veryHard"].includes(parsed.difficultyKey)) {
     state.difficultyKey = parsed.difficultyKey;
   }
@@ -79,6 +88,9 @@ export function loadState(vehicleById) {
   }
   if (parsed.financeGroupBy === "metric" || parsed.financeGroupBy === "leg") {
     state.financeGroupBy = parsed.financeGroupBy;
+  }
+  if (typeof parsed.includeStopsInFinancials === "boolean") {
+    state.includeStopsInFinancials = parsed.includeStopsInFinancials;
   }
   if (parsed.accelerationDetail === "simple" || parsed.accelerationDetail === "detailed") {
     state.accelerationDetail = parsed.accelerationDetail;
@@ -90,11 +102,16 @@ export function loadState(vehicleById) {
   return { state, warning: warnings.length > 0 ? warnings.join(" ") : null };
 }
 
+// Must match js/charts.js's SERIES_SLOTS — duplicated here (not imported)
+// so this module stays dependency-free/standalone, as designed.
+const SERIES_SLOTS = 8;
+
 function reconstructTrains(rawTrains, vehicleById) {
   if (!Array.isArray(rawTrains)) throw new Error("trains is not an array");
   let droppedCount = 0;
   const trains = rawTrains.map((rawTrain) => ({
     name: typeof rawTrain?.name === "string" && rawTrain.name ? rawTrain.name : null,
+    color: Number.isInteger(rawTrain?.color) && rawTrain.color >= 0 && rawTrain.color < SERIES_SLOTS ? rawTrain.color : null,
     locomotives: filterConsistItems(rawTrain?.locomotives, vehicleById, () => droppedCount++),
     wagons: filterConsistItems(rawTrain?.wagons, vehicleById, () => droppedCount++),
   }));
