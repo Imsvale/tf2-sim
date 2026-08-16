@@ -78,6 +78,25 @@ throughout.
         resistance got dashed-underline tooltips too (2× nominal; and
         `R = m · g · C, C = 0.002`, respectively), same `.info-tooltip`
         pattern as elsewhere, replacing an inline "(2× nominal)" parenthetical
+  - [x] Taper zone fixed against real tf2-watcher captures: the taper
+        factor is **squared**, not square-rooted — `taperFactor()` in
+        `js/physics.js`. The onset constant (20) and the 0.95 threshold
+        were already correct; only the exponent was wrong. Found by
+        parsing `../tf2-watcher/tests/{CHS4,VL80S}.csv` (real in-game
+        `dyn.accel` traces, ~5 Hz), back-solving each train's mass from its
+        own flat force-limited plateau (the wagon consist isn't logged),
+        and grid-searching the taper's multiplier and exponent jointly
+        against the taper-zone samples — both vehicles independently
+        converge on multiplier ≈20 (unchanged), exponent ≈2.1; pinning it
+        to exactly 2 lands within noise of the best possible fit on both.
+        Taper-zone RMSE goes from 0.05–0.07 m/s² (current formula) to
+        0.0015–0.0033 m/s² (corrected) — now in the same range as the
+        already-trusted pre-95% zone. Full analysis and derivation in
+        docs/acceleration_formulas.md's "Precision validation" section
+        ("Resolved: the exponent, not the constant"). The separate
+        hard-cap-at-`v_max` discrepancy (real vehicles stop dead at
+        `v_max` instead of asymptotically crawling toward
+        `k = v_max + 0.136`) is untouched by this fix and remains open.
 - [x] Revenue formula (per passenger/cargo payment) — [docs/revenue_formulas.md](docs/revenue_formulas.md), `js/finance.js`
 - [x] Maintenance formula wired in (`js/finance.js`, "fixed over time" —
       always the operating rate, no station/depot state modeling)

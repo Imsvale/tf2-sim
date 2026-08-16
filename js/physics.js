@@ -20,9 +20,18 @@
 const DEFAULT_GRAVITY_MS2 = 9.81;
 const ROLLING_RESISTANCE_C = 0.002;
 
+// Squared, not square-rooted — confirmed against real in-game telemetry
+// (../../tf2-watcher/tests/*.csv, see docs/acceleration_formulas.md's
+// "Resolved: the exponent, not the constant"). The onset constant (20) and
+// the 0.95 threshold were already correct; a sqrt here over-tapers
+// immediately past v_95, while squaring reproduces the observed shape
+// (barely noticeable taper just past v_95, falling off hard near the cap)
+// to within noise of the already-trusted pre-95% zone on both captured
+// vehicles.
 function taperFactor(v, k) {
   const x = 20 * (v / k - 0.95);
-  return Math.sqrt(Math.max(0, Math.min(1, x)));
+  const clamped = Math.max(0, Math.min(1, x));
+  return clamped * clamped;
 }
 
 // Builds the full-curve acceleration function for one aggregate + track

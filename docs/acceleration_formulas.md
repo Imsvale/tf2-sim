@@ -122,9 +122,15 @@ d_2 = D(v_t, v_95)
 Above ~95% of top speed, the game applies an acceleration taper:
 
 ```
-f(v) = sqrt(clamp(20·(v/k − 0.95), 0, 1))       # k = v_max + 0.136, m/s
+f(v) = clamp(20·(v/k − 0.95), 0, 1)²            # k = v_max + 0.136, m/s
 a    = a_raw(v) · (1 − f(v))                    # a_raw = (min(P/v, F) − R) / m
 ```
+
+**The exponent is squared, not square-rooted** — corrected from an earlier
+version of this doc (and this app) that used `sqrt` here, per real in-game
+telemetry; see "Precision validation" below (specifically "Resolved: the
+exponent, not the constant") for the captures and the fit that confirmed
+this.
 
 This app computes `t_3`/`d_3` by **numerically integrating this directly**
 (`js/physics.js`, RK4, `v_95 → v`) rather than using a closed form — there
@@ -206,30 +212,45 @@ below.
 ### Why "time to top speed" is asymptotic
 
 Let `ε = k − v` (distance from the true hard cap `k = v_max + 0.136`, not
-from `v_max` itself). Near `v = k`:
+from `v_max` itself). Near `v = k`, `x = 20·(v/k − 0.95) ≈ 1 − 20ε/k`, so
+with the corrected `f(v) = x²`:
 
 ```
-q(v)   ≈ 1 − 10ε/k        (for small ε)
-1−q(v) ≈ 10ε/k
+f(v)   ≈ 1 − 40ε/k        (for small ε)
+1−f(v) ≈ 40ε/k
 ```
 
-So `a = a_raw·(1 − q)` decays **linearly** in `(k − v)` as `v → k`. Plugging
+(The squared formula decays 4× steeper right at the cap than the old
+square-root one would have — `d(x²)/dx` at `x=1` is `2`, versus `d(√x)/dx`
+there being `0.5` — but the shape of the conclusion below is unchanged
+either way, since both are smooth with a nonzero derivative at `x = 1`.)
+
+So `a = a_raw·(1 − f)` decays **linearly** in `(k − v)` as `v → k`. Plugging
 into `dv/dt = a` gives `dε/dt ≈ −C·ε`, i.e. **exponential relaxation**:
 `v` approaches `k` asymptotically and never reaches it in finite time.
 `v_max` itself sits a fixed `0.136 m/s` below that true asymptote — always,
 regardless of the vehicle's actual speed — so for a fast train that's a
 tiny relative gap (0.16% for a 300 km/h train) and the final approach to
-`v_max` crawls. This is a plausible structural reason the taper correction
-would depend on `ln(V)` at all, independent of curve-fitting.
+`v_max` crawls.
 
-Running the direct simulation for the Avelia Liberty example: at the
-"observed" `68 s` mark the train has only reached **295.68 km/h — 98.56% of
-its 300 km/h top speed**, not the mathematically exact value. Reaching
-exactly 300.00 km/h takes ~237 s in that same simulation. This is consistent
-with "68 s" being where a human observer judged the vehicle had visually
-stopped accelerating, not a measurement of convergence to `v_max` — i.e. the
-formula isn't wrong, the old manual measurement just wasn't measuring what
-it was assumed to be measuring.
+**This asymptotic-crawl picture is itself not what the captures show,
+independent of the exponent fix** — see "Confirmed NOT matching the
+formula" above: real vehicles hit a hard, exact cap at `v_max` and stop,
+they don't keep asymptotically creeping toward `k`. The reasoning here
+describes the model's own idealized behavior, not confirmed in-game
+behavior at the very top of the speed range.
+
+Running the direct simulation for the Avelia Liberty example: the source
+article's own table ([acceleration.md](acceleration.md)) reports "Time 95%
+to v_max: predicted 37 s, observed 68 s" — both **past the 95% mark**
+(`t_95 ≈ 329 s`), not from a standing start, so the observed milestone is
+`t_95 + 68 s ≈ 397 s` total. At that point the train has only reached
+**299.70 km/h — 99.90% of its 300 km/h top speed**, not the mathematically
+exact value — displayed speed doesn't read exactly 300.000 km/h until
+`t_95 + 78 s`. This is consistent with "68 s" being where a human observer
+judged the vehicle had visually stopped accelerating, not a measurement of
+convergence to `v_max` — i.e. the formula isn't wrong, the old manual
+measurement just wasn't measuring what it was assumed to be measuring.
 
 **Implication for this app:** "time/distance to exact top speed" is a
 legitimate, accurately-simulated number now (not a fitted approximation),
@@ -238,7 +259,98 @@ asymptotic tail — that's expected behavior, not a bug. The app also shows
 time/distance to 95% of top speed alongside it, which is a more
 "practical" milestone unaffected by the tail.
 
+## Precision validation (tf2-watcher, in-game captures)
+
+Supersedes the manual-measurement caveat above for the taper zone
+specifically: `../tf2-watcher` (a sibling project) captures real in-game
+`(time, speed, acceleration)` traces directly from the engine's own
+`MOVE_PATH.dyn` state at the simulation's own ~5 Hz tick rate — not manual
+speedometer/ruler reading. Two full 0→top-speed captures exist so far,
+both from a standing start on a flat, straight track: Russian Class CHS4
+(wagon-limited, effective top speed 120 km/h) and Russian Class VL80S
+(loco-limited, effective top speed 110 km/h, otherwise identical consist).
+
+**Confirmed matching the formula, essentially exactly:**
+- Force-limited and power-limited phases (`v_0` through `v_95`): predicted
+  acceleration matches observed to within ~0.1–1% at almost every sampled
+  point on both vehicles (mean absolute error ≈0.003 m/s²).
+- The `v_95` onset point itself: the real acceleration curve visibly
+  steepens right at `0.95·(v_max/3.6 + 0.136)` on both vehicles (CHS4:
+  ≈31.8 m/s; VL80S: ≈29.16 m/s) — within a tick or two of the predicted
+  value in both cases.
+
+**Confirmed NOT matching the formula (as it stood — see "Resolved" below):**
+- The taper zone's decay *rate* (`v_95 → v_max`). Real acceleration
+  exceeded the formula's prediction at every single sampled point past
+  `v_95`, on both vehicles — not noise, a clean single-peaked discrepancy
+  (roughly 100–130% relative error at its worst, around 97% of top speed).
+  `f(v) = sqrt(clamp(20·(v/k − 0.95), 0, 1))` did not agree with in-game
+  observation in this zone — since fixed, see below.
+- The approach to top speed is not the asymptotic crawl toward
+  `k = v_max + 0.136` described above. In both captures, `speed` hits a
+  hard, exact cap at `v_max` (float32-identical across 100+ consecutive
+  ticks) and stops — it does not keep creeping toward `k`. `accel` doesn't
+  reach zero either; it freezes at a small nonzero residual (different
+  between the two vehicles) the instant the cap engages, rather than
+  decaying to zero the way the formula's asymptotic framing implies it
+  should.
+
+Raw captures: `../tf2-watcher/tests/CHS4.csv`, `../tf2-watcher/tests/VL80S.csv`.
+
+### Resolved: the exponent, not the constant
+
+An earlier pass here tried refitting just the multiplier `N` in
+`f(v) = sqrt(clamp(N·(v/k − 0.95), 0, 1))` (documented `N = 20`) and found
+CHS4's best fit around `N ≈ 7.25`, VL80S's around `N ≈ 6.75` — a real
+improvement (RMSE roughly halved on both) but not a clean one: at that
+`N` the curve still visibly undershoots early in the taper zone and
+overshoots late, a different-shaped residual than `N = 20`'s, not a flat
+improvement to zero. That's because `N` was the wrong knob.
+
+Freeing the *exponent* instead — `f(v) = clamp(N·(v/k − 0.95), 0, 1) ^ p`,
+searching `N` and `p` jointly — resolves it. Both captures, fit
+independently, converge on essentially the same answer: `N ≈ 20` (the
+*documented* value, unchanged) and `p ≈ 2.1`. Fixing `p = 2` exactly (not
+re-fitting, just checking) still lands within noise of the best possible
+fit on both vehicles:
+
+```
+f(v) = clamp(20·(v/k − 0.95), 0, 1)²        # squared, not square-rooted
+```
+
+| | CHS4 | VL80S | (pre-95% zone, for scale) |
+|---|---|---|---|
+| RMSE, current (`sqrt`) | 0.050 m/s² | 0.069 m/s² | — |
+| RMSE, corrected (`²`) | 0.0015 m/s² | 0.0033 m/s² | 0.0018 / 0.0076 m/s² |
+
+The corrected formula's taper-zone error is now in the same range as the
+already-trusted pre-95% zone, on both vehicles — not just "better," but
+essentially exact. `sqrt(x)` rises steeply the instant `x` leaves 0, which
+is why the current formula over-tapers immediately past `v_95`; `x²` rises
+slowly at first and steeply only near `x = 1`, matching the observed shape
+(taper barely noticeable just past `v_95`, then falls off hard approaching
+the cap) far better than either a bare square root or a rescaled one ever
+could.
+
+Train mass for this analysis (not logged by the capture — only locomotive
+type is known, not the wagon consist) is back-solved from each capture's
+own flat force-limited plateau at the very start of the run:
+`a₀ = F/m − g·C`, so `m = F / (a₀ + g·C)` directly, no consist guess
+needed. With that derived mass, the pre-95% zone matches the *un-tapered*
+formula almost exactly (mean absolute error <0.003 m/s² on both vehicles)
+— confirming the mass is sound before trusting anything built on top of
+it in the taper zone.
+
+**Applied to `js/physics.js`** (`taperFactor()`) — this was a strong,
+cross-validated result on the only two captures available, but still just
+two vehicles; worth re-checking as more captures come in.
+
 ## Open questions / not yet modeled
+
+- The hard cap at `v_max` (see "Confirmed NOT matching the formula" above)
+  — the model still assumes an asymptotic crawl toward
+  `k = v_max + 0.136` that the captures don't show. Separate from the
+  exponent fix above and still unresolved.
 
 - Gradient (slope) resistance — not curves, which aren't a resistance
   mechanic in-game, only a speed-limit one. On a slope, gravity is no
