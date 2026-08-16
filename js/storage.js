@@ -89,6 +89,9 @@ export function validateState(parsed, vehicleById) {
   if (typeof parsed.brakingDeceleration_ms2 === "number" && parsed.brakingDeceleration_ms2 > 0) {
     state.brakingDeceleration_ms2 = parsed.brakingDeceleration_ms2;
   }
+  if (typeof parsed.gravity_ms2 === "number" && parsed.gravity_ms2 > 0) {
+    state.gravity_ms2 = parsed.gravity_ms2;
+  }
   // Out-of-range (e.g. that leg's station got removed) is self-healed by
   // js/main.js's renderLegSelect(), which clamps it back to 0 on render —
   // no need to cross-reference the reconstructed route's leg count here too.
@@ -110,7 +113,7 @@ export function validateState(parsed, vehicleById) {
   if (parsed.accelerationDetail === "simple" || parsed.accelerationDetail === "detailed") {
     state.accelerationDetail = parsed.accelerationDetail;
   }
-  if (["trains", "graphs", "route", "financials"].includes(parsed.activeTab)) {
+  if (["trains", "graphs", "route", "financials", "experimental"].includes(parsed.activeTab)) {
     state.activeTab = parsed.activeTab;
   }
 

@@ -12,7 +12,12 @@
 // and only the *sum of those curves* — not a curve built from summed
 // scalars — gives the correct total drive force at a given speed.
 
-const G = 9.81;
+// Default/vanilla gravity — the formula's own correctness at this value
+// isn't confirmed (see docs/acceleration_formulas.md), which is exactly why
+// every caller threads its own gravity_ms2 through rather than this module
+// hardcoding it: the Physics tab's gravity control lets it be overridden
+// end to end for comparison against real in-game telemetry.
+const DEFAULT_GRAVITY_MS2 = 9.81;
 const ROLLING_RESISTANCE_C = 0.002;
 
 function taperFactor(v, k) {
@@ -26,7 +31,7 @@ function taperFactor(v, k) {
 // locomotives can coexist in the same consist at the same speed. The taper
 // factor naturally evaluates to 0 below v_95 (see acceleration_formulas.md),
 // so no separate phase branching is needed for that either.
-function buildDynamics(aggregate) {
+function buildDynamics(aggregate, gravity_ms2 = DEFAULT_GRAVITY_MS2) {
   const { mass_t: m, topSpeed_kmh: V, locomotiveUnits } = aggregate;
   if (!m || !V || !locomotiveUnits || locomotiveUnits.length === 0) return null;
 
@@ -35,7 +40,7 @@ function buildDynamics(aggregate) {
     .filter((u) => u.P > 0 && u.F > 0 && u.count > 0);
   if (units.length === 0) return null;
 
-  const R = m * G * ROLLING_RESISTANCE_C;
+  const R = m * gravity_ms2 * ROLLING_RESISTANCE_C;
 
   // v/0 is +Infinity in IEEE754 (P is always positive here), so this
   // correctly reduces to each locomotive's force-limited max at v=0
@@ -107,17 +112,18 @@ function rk4Step(v, step, accel) {
  *   tied to the vehicle/train's own topSpeed_kmh.
  * @param {object} options.stopAt - exactly one of { speed_kmh } | { distance_m } | { duration_s }
  * @param {boolean} [options.sample=false] - collect a downsampled {t,v_kmh,d_m,a_ms2} trajectory
+ * @param {number} [options.gravity_ms2=9.81] - see buildDynamics
  * @returns {null|{warning:string}|object} null if the vehicle can't move (no
  *   power/TE/mass/topSpeed — e.g. a wagon), a { warning } object if it can't
  *   overcome rolling resistance, or the simulation result.
  */
 export function simulate(aggregate, options) {
-  const dynamics = buildDynamics(aggregate);
+  const { initialSpeed_kmh = 0, trackSpeedLimit_kmh = null, stopAt, sample = false, gravity_ms2 } = options;
+  const dynamics = buildDynamics(aggregate, gravity_ms2);
   if (!dynamics) return null;
   if (dynamics.warning) return dynamics;
 
   const { m, accel, ownTopSpeed, k, vt } = dynamics;
-  const { initialSpeed_kmh = 0, trackSpeedLimit_kmh = null, stopAt, sample = false } = options;
 
   const effectiveTop = trackSpeedLimit_kmh != null ? Math.min(ownTopSpeed, trackSpeedLimit_kmh / 3.6) : ownTopSpeed;
   const v95 = 0.95 * k;
@@ -205,23 +211,26 @@ export function simulate(aggregate, options) {
  * @param {number|null} [options.trackSpeedLimit_kmh=null]
  * @param {number} options.brakingDeceleration_ms2 - flat, positive (e.g. 2.5)
  * @param {boolean} [options.sample=false] - collect a downsampled
- *   {t,v_kmh,d_m,phase} trajectory; phase is "run" (accelerating/cruising)
- *   or "brake", so callers can render the two differently
+ *   {t,v_kmh,d_m,a_ms2,phase} trajectory; phase is "run" (accelerating/
+ *   cruising) or "brake" (a_ms2 is exactly -brakingDeceleration_ms2
+ *   throughout that phase — flat, not run through accel()/the taper), so
+ *   callers can render the two differently
+ * @param {number} [options.gravity_ms2=9.81] - see buildDynamics
  * @returns {null|{warning:string}|object}
  */
 export function simulateToStop(aggregate, distance_m, options) {
-  const dynamics = buildDynamics(aggregate);
+  const { trackSpeedLimit_kmh = null, brakingDeceleration_ms2, sample = false, gravity_ms2 } = options;
+  const dynamics = buildDynamics(aggregate, gravity_ms2);
   if (!dynamics) return null;
   if (dynamics.warning) return dynamics;
 
   const { accel, ownTopSpeed } = dynamics;
-  const { trackSpeedLimit_kmh = null, brakingDeceleration_ms2, sample = false } = options;
   const effectiveTop = trackSpeedLimit_kmh != null ? Math.min(ownTopSpeed, trackSpeedLimit_kmh / 3.6) : ownTopSpeed;
 
   let v = 0;
   let t = 0;
   let d = 0;
-  const rawSamples = sample ? [{ t, v_kmh: 0, d_m: 0, phase: "run" }] : null;
+  const rawSamples = sample ? [{ t, v_kmh: 0, d_m: 0, a_ms2: accel(0), phase: "run" }] : null;
 
   for (let i = 0; i < MAX_STEPS && v < effectiveTop; i++) {
     const brakeDistanceIfNow = (v * v) / (2 * brakingDeceleration_ms2);
@@ -230,7 +239,7 @@ export function simulateToStop(aggregate, distance_m, options) {
     v += dv;
     d += dd;
     t += RK4_DT;
-    if (sample) rawSamples.push({ t, v_kmh: v * 3.6, d_m: d, phase: "run" });
+    if (sample) rawSamples.push({ t, v_kmh: v * 3.6, d_m: d, a_ms2: accel(v), phase: "run" });
   }
 
   // The loop above can only exit by the braking trigger (v stays below
@@ -242,7 +251,7 @@ export function simulateToStop(aggregate, distance_m, options) {
     const cruiseDistance = Math.max(0, distance_m - d - brakeDistance);
     t += cruiseDistance / effectiveTop;
     d += cruiseDistance;
-    if (sample) rawSamples.push({ t, v_kmh: effectiveTop * 3.6, d_m: d, phase: "run" });
+    if (sample) rawSamples.push({ t, v_kmh: effectiveTop * 3.6, d_m: d, a_ms2: accel(v), phase: "run" });
   }
 
   const brakeStart = { t, d, v };
@@ -253,7 +262,7 @@ export function simulateToStop(aggregate, distance_m, options) {
       const bt = (brakeTime * i) / BRAKE_STEPS;
       const bv = Math.max(0, v - brakingDeceleration_ms2 * bt);
       const bd = d + v * bt - 0.5 * brakingDeceleration_ms2 * bt * bt;
-      rawSamples.push({ t: t + bt, v_kmh: bv * 3.6, d_m: bd, phase: "brake" });
+      rawSamples.push({ t: t + bt, v_kmh: bv * 3.6, d_m: bd, a_ms2: -brakingDeceleration_ms2, phase: "brake" });
     }
   }
 
@@ -286,33 +295,33 @@ function downsample(samples, maxPoints) {
  * this, and not the raw drive force, is what should be plotted: it's the
  * force-domain quantity consistent with the actual (tapered) acceleration.
  */
-export function forceAtSpeed(aggregate, v_kmh) {
-  const dynamics = buildDynamics(aggregate);
+export function forceAtSpeed(aggregate, v_kmh, gravity_ms2) {
+  const dynamics = buildDynamics(aggregate, gravity_ms2);
   if (!dynamics || dynamics.warning) return null;
   return dynamics.effectiveForce(v_kmh / 3.6);
 }
 
 /** Acceleration at a given speed (m/s²), including taper, for the acceleration-vs-speed graph. */
-export function accelerationAtSpeed(aggregate, v_kmh) {
-  const dynamics = buildDynamics(aggregate);
+export function accelerationAtSpeed(aggregate, v_kmh, gravity_ms2) {
+  const dynamics = buildDynamics(aggregate, gravity_ms2);
   if (!dynamics || dynamics.warning) return null;
   return dynamics.accel(v_kmh / 3.6);
 }
 
 /** Rolling resistance (kN) for an aggregate, exposed for the acceleration-stats display. */
-export function rollingResistance(aggregate) {
-  const dynamics = buildDynamics(aggregate);
+export function rollingResistance(aggregate, gravity_ms2) {
+  const dynamics = buildDynamics(aggregate, gravity_ms2);
   if (!dynamics || dynamics.warning) return null;
   return dynamics.R;
 }
 
 /** Convenience: full-curve stats to the aggregate's own (optionally track-capped) top speed. */
-export function computeAccelerationStats(aggregate, trackSpeedLimit_kmh = null) {
-  const dynamics = buildDynamics(aggregate);
+export function computeAccelerationStats(aggregate, trackSpeedLimit_kmh = null, gravity_ms2) {
+  const dynamics = buildDynamics(aggregate, gravity_ms2);
   if (!dynamics) return null;
   if (dynamics.warning) return dynamics;
 
-  const result = simulate(aggregate, { trackSpeedLimit_kmh, stopAt: {} });
+  const result = simulate(aggregate, { trackSpeedLimit_kmh, stopAt: {}, gravity_ms2 });
   return {
     rollingResistance_kN: dynamics.R,
     effectiveTractiveEffort_kN: dynamics.F0,

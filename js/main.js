@@ -17,7 +17,14 @@ import {
 } from "./train.js";
 import { createRoute, addStation, removeStation, estimateTrackDistance, effectiveTrackDistance } from "./route.js";
 import { computeAccelerationStats } from "./physics.js";
-import { DIFFICULTY_FACTORS, tripSummary } from "./finance.js";
+import {
+  DIFFICULTY_FACTORS,
+  tripSummary,
+  breakEvenAverageSpeedUpperBound_kmh,
+  breakEvenLoadFactorUpperBound,
+  paybackPeriodRealHours,
+  breakEvenWagonCount,
+} from "./finance.js";
 import { renderCharts, renderFinanceCharts, renderRouteProfileCharts, renderWholeRouteChart, SERIES_SLOTS, seriesColor } from "./charts.js";
 import { initChartGallery } from "./chartGallery.js";
 import { saveState, loadState, validateState } from "./storage.js";
@@ -32,6 +39,7 @@ const state = {
   route: createRoute(),
   trackSpeedLimit_kmh: 300,
   brakingDeceleration_ms2: 2.5,
+  gravity_ms2: 9.81,
   selectedLegIndex: 0,
   difficultyKey: "easy",
   includeStopsInFinancials: false,
@@ -741,6 +749,19 @@ function initAccelerationControls() {
     state.accelerationDetail = e.target.value;
     recompute();
   });
+
+  const gravityInput = document.getElementById("gravity-input");
+  gravityInput.addEventListener("change", () => {
+    const value = Number(gravityInput.value);
+    // Fixed to 2 decimals — also what keeps the up/down arrows' repeated
+    // +/-0.01 steps from drifting into binary-floating-point noise (e.g.
+    // 9.819999999999999): every change re-rounds and re-formats, arrow
+    // steps included, since bump() dispatches a "change" event too.
+    state.gravity_ms2 = value > 0 ? Math.round(value * 100) / 100 : 9.81;
+    gravityInput.value = state.gravity_ms2.toFixed(2);
+    recompute();
+  });
+  wrapExistingNumberField(gravityInput, { step: 0.01, unit: "m/s²" });
 }
 
 function renderAccelerationSection(aggregates) {
@@ -749,7 +770,7 @@ function renderAccelerationSection(aggregates) {
   const body = document.getElementById("acceleration-table-body");
 
   const results = aggregates.map((entry) =>
-    entry ? computeAccelerationStats(entry.aggregate, state.trackSpeedLimit_kmh) : null
+    entry ? computeAccelerationStats(entry.aggregate, state.trackSpeedLimit_kmh, state.gravity_ms2) : null
   );
 
   if (!results.some(Boolean)) {
@@ -935,7 +956,7 @@ function buildRouteRow(station, index, aggregates) {
     routeNumberInput(leg.crowDistance_m != null ? leg.crowDistance_m / 1000 : "", (value) => {
       leg.crowDistance_m = value === "" ? null : Number(value) * 1000;
       recompute();
-    }, null, 6).field
+    }, null, 5).field
   );
   row.appendChild(crowTd);
 
@@ -949,7 +970,7 @@ function buildRouteRow(station, index, aggregates) {
       recompute();
     },
     null,
-    6
+    5
   );
   trackWrap.appendChild(track.field);
   const estimateBtn = document.createElement("button");
@@ -973,7 +994,7 @@ function buildRouteRow(station, index, aggregates) {
     loadInput.value = Math.round(leg.loadFactor * 100);
     recompute();
   });
-  loadTd.append(wrapNumberField(loadInput, { unit: "%", widthCh: 8 }));
+  loadTd.append(wrapNumberField(loadInput, { unit: "%", widthCh: 4 }));
   row.appendChild(loadTd);
 
   const removeTd = document.createElement("td");
@@ -1051,7 +1072,7 @@ function openTrackDistanceEstimatorPopover(anchorEl, leg, trackDistanceInput, ag
       result.textContent = "Pick a train with vehicles and enter a time.";
       return;
     }
-    const distance_m = estimateTrackDistance(entry.aggregate, time_s, state.trackSpeedLimit_kmh);
+    const distance_m = estimateTrackDistance(entry.aggregate, time_s, state.trackSpeedLimit_kmh, state.gravity_ms2);
     if (distance_m == null) {
       result.textContent = "Can't estimate — that train can't move.";
       return;
@@ -1118,6 +1139,117 @@ function initFinanceControls() {
     state.includeStopsInFinancials = e.target.checked;
     recompute();
   });
+}
+
+// ---- experimental tab ----
+
+// Local, not part of `state` (not saved between visits — see the tab's own
+// hint text) since this is explicitly a rough, evolving feature; adding a
+// whole persisted-state slice for it felt premature.
+const experimentState = {
+  locomotiveId: null,
+  wagonId: null,
+  loadFactor: 1,
+  maxWagons: 20,
+};
+
+function initExperimentalControls() {
+  const locoSelect = document.getElementById("experiment-locomotive-select");
+  const wagonSelect = document.getElementById("experiment-wagon-select");
+  populateSelectOptions(locoSelect, locomotivesOf(state.vehicles));
+  populateSelectOptions(wagonSelect, wagonsOf(state.vehicles));
+  experimentState.locomotiveId = defaultLocomotive()?.id ?? null;
+  experimentState.wagonId = defaultWagon()?.id ?? null;
+  if (experimentState.locomotiveId) locoSelect.value = experimentState.locomotiveId;
+  if (experimentState.wagonId) wagonSelect.value = experimentState.wagonId;
+
+  locoSelect.addEventListener("change", () => {
+    experimentState.locomotiveId = locoSelect.value;
+    renderExperimentalTable();
+  });
+  wagonSelect.addEventListener("change", () => {
+    experimentState.wagonId = wagonSelect.value;
+    renderExperimentalTable();
+  });
+
+  const loadInput = document.getElementById("experiment-load-factor-input");
+  loadInput.addEventListener("change", () => {
+    experimentState.loadFactor = Math.max(0, Math.min(100, Number(loadInput.value) || 0)) / 100;
+    loadInput.value = Math.round(experimentState.loadFactor * 100);
+    renderExperimentalTable();
+  });
+  wrapExistingNumberField(loadInput, { unit: "%" });
+
+  const maxWagonsInput = document.getElementById("experiment-max-wagons-input");
+  maxWagonsInput.addEventListener("change", () => {
+    experimentState.maxWagons = Math.max(1, Math.floor(Number(maxWagonsInput.value)) || 1);
+    maxWagonsInput.value = experimentState.maxWagons;
+    renderExperimentalTable();
+  });
+  wrapExistingNumberField(maxWagonsInput, {});
+}
+
+// One locomotive + a growing wagon count of one wagon type — see the tab's
+// own hint text for why this is intentionally the simple case (a single
+// wagon type, not an arbitrary multi-group train) for a first pass at this.
+function renderExperimentalTable() {
+  const body = document.getElementById("experiment-table-body");
+  const summaryEl = document.getElementById("experiment-wagon-count-summary");
+  body.innerHTML = "";
+  summaryEl.textContent = "";
+  if (!experimentState.locomotiveId || !experimentState.wagonId) return;
+
+  const options = { difficulty: DIFFICULTY_FACTORS[state.difficultyKey], loadFactor: experimentState.loadFactor };
+
+  const trainWith = (wagonCount) => {
+    const train = createTrain();
+    insertLocomotive(train, 0, experimentState.locomotiveId, 1);
+    if (wagonCount > 0) insertWagon(train, 0, experimentState.wagonId, wagonCount);
+    return aggregateTrain(train, state.vehicleById);
+  };
+
+  // breakEvenWagonCount needs the locomotive-alone and +1-wagon points to
+  // read off this wagon type's own per-unit price/capacity contribution —
+  // a property of the loco/wagon *pair*, not of any specific row below, so
+  // computed once rather than per row.
+  const agg0 = trainWith(0);
+  const agg1 = trainWith(1);
+  if (agg0 && agg1) {
+    const target_kmh = agg1.topSpeed_kmh;
+    const N = breakEvenWagonCount(agg0, agg1, target_kmh, options);
+    if (N === 0) {
+      summaryEl.textContent = `Break-even at 0 wagons — the locomotive alone already guarantees profit at its own top speed (${target_kmh} km/h, ${Math.round(experimentState.loadFactor * 100)}% load), on any distance.`;
+    } else if (N != null) {
+      summaryEl.textContent = `Break-even at ~${N.toFixed(1)} wagons — the fewest (fractional; round up) needed for this locomotive's own top speed (${target_kmh} km/h) to guarantee profit at ${Math.round(experimentState.loadFactor * 100)}% load, on any distance.`;
+    } else {
+      summaryEl.textContent = `This wagon never gets there: adding more doesn't bring the break-even upper bound down to this locomotive's own top speed (${target_kmh} km/h) at ${Math.round(experimentState.loadFactor * 100)}% load.`;
+    }
+  }
+
+  for (let wagonCount = 1; wagonCount <= experimentState.maxWagons; wagonCount++) {
+    const aggregate = trainWith(wagonCount);
+    if (!aggregate) continue;
+
+    const upperBound_kmh = breakEvenAverageSpeedUpperBound_kmh(aggregate, options);
+    const requiredLoad = breakEvenLoadFactorUpperBound(aggregate, aggregate.topSpeed_kmh, { difficulty: options.difficulty });
+    const payback_h = paybackPeriodRealHours(aggregate, aggregate.topSpeed_kmh, options);
+
+    const row = document.createElement("tr");
+    const wagonsTd = document.createElement("td");
+    wagonsTd.textContent = wagonCount;
+    const capacityTd = document.createElement("td");
+    capacityTd.textContent = aggregate.passengerCapacity + aggregate.cargoCapacity;
+    const priceTd = document.createElement("td");
+    priceTd.textContent = formatMoneyCompact(aggregate.price);
+    const speedTd = document.createElement("td");
+    speedTd.textContent = upperBound_kmh != null ? `${upperBound_kmh.toFixed(1)} km/h` : "—";
+    const loadTd = document.createElement("td");
+    loadTd.textContent = requiredLoad != null ? `${(requiredLoad * 100).toFixed(0)}%` : "—";
+    const paybackTd = document.createElement("td");
+    paybackTd.textContent = payback_h != null ? `${payback_h < 1 ? payback_h.toFixed(2) : payback_h.toFixed(1)} h` : "never";
+    row.append(wagonsTd, capacityTd, priceTd, speedTd, loadTd, paybackTd);
+    body.appendChild(row);
+  }
 }
 
 // Builds one <table class="compare-table"> (train columns via the existing
@@ -1230,6 +1362,7 @@ function renderFinance(aggregates) {
     difficulty: DIFFICULTY_FACTORS[state.difficultyKey],
     includeStops: state.includeStopsInFinancials,
     brakingDeceleration_ms2: state.brakingDeceleration_ms2,
+    gravity_ms2: state.gravity_ms2,
   };
   const summaries = aggregates.map((entry) => (entry ? tripSummary(entry.aggregate, state.route, options) : null));
 
@@ -1264,20 +1397,23 @@ function recompute() {
     renderTrainSpecTable(aggregates);
     renderAccelerationSection(aggregates);
     renderFinance(aggregates);
-    renderCharts(aggregates, state.trackSpeedLimit_kmh);
+    renderCharts(aggregates, state.trackSpeedLimit_kmh, state.gravity_ms2);
 
     const selectedLeg = state.route.legs[state.selectedLegIndex];
-    const legDistance_m = selectedLeg ? effectiveTrackDistance(selectedLeg) : null;
-    if (legDistance_m != null) {
-      renderRouteProfileCharts(aggregates, legDistance_m, {
+    if (selectedLeg) {
+      renderRouteProfileCharts(aggregates, selectedLeg, {
         trackSpeedLimit_kmh: state.trackSpeedLimit_kmh,
         brakingDeceleration_ms2: state.brakingDeceleration_ms2,
+        difficulty: DIFFICULTY_FACTORS[state.difficultyKey],
+        gravity_ms2: state.gravity_ms2,
       });
     }
     renderWholeRouteChart(aggregates, state.route, {
       trackSpeedLimit_kmh: state.trackSpeedLimit_kmh,
       brakingDeceleration_ms2: state.brakingDeceleration_ms2,
+      gravity_ms2: state.gravity_ms2,
     });
+    renderExperimentalTable(); // depends on state.difficultyKey, not on trains/route -- still cheap enough to just always refresh here
 
     saveState(state);
   } catch (e) {
@@ -1308,6 +1444,7 @@ function applyLoadedUIState() {
     trackCustom.value = state.trackSpeedLimit_kmh;
   }
   document.getElementById("braking-decel-input").value = state.brakingDeceleration_ms2;
+  document.getElementById("gravity-input").value = state.gravity_ms2.toFixed(2);
 
   setActiveTab(state.activeTab);
 }
@@ -1383,13 +1520,14 @@ async function init() {
   initAccelerationControls();
   initRouteControls();
   initFinanceControls();
+  initExperimentalControls();
   initShareLink();
   initTheme(() => renderCharts(aggregatesWithLabels(), state.trackSpeedLimit_kmh));
 
   applyLoadedUIState();
   renderTrainList();
   renderRoute(aggregatesWithLabels());
-  recompute();
+  recompute(); // also renders the experimental table (see recompute())
 }
 
 init().catch((err) => {

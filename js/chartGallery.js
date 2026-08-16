@@ -107,6 +107,9 @@ export function closeChartGallery() {
 export function initChartGallery() {
   const { modal, closeBtn, prevBtn, nextBtn, fullscreenBtn, resetZoomBtn } = els();
 
+  prevBtn.innerHTML = iconSvg("chevron-left");
+  nextBtn.innerHTML = iconSvg("chevron-right");
+
   closeBtn.addEventListener("click", closeChartGallery);
   prevBtn.addEventListener("click", () => navigate(-1));
   nextBtn.addEventListener("click", () => navigate(1));

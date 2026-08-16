@@ -919,13 +919,20 @@ body.chart-gallery-open {
   min-height: 0;
   position: relative;
   display: flex;
-  /* stretch (not center): the nav buttons are absolutely positioned (out of
-     flow), so .chart-canvas-wrap is the only in-flow child — it needs the
-     full height here, or its absolutely-positioned canvas has nothing to
-     size against. */
+  /* stretch: .chart-canvas-wrap is the only child — it needs the full
+     height here, or its absolutely-positioned canvas has nothing to size
+     against. */
   align-items: stretch;
 }
 
+/* Positioned relative to .chart-gallery (the fixed, inset:0 backdrop), not
+   .chart-gallery-panel — these live in the dimmed void beyond the card
+   itself, not overlapping it, so top:50% here centers on the *viewport*.
+   That's the same point as the panel's own vertical center regardless of
+   panel height, since the panel is itself centered in this same
+   fixed/inset:0 box via flex. On narrow viewports (see the max-width:700px
+   query below) the panel goes full-bleed and there's no void left, so the
+   buttons move back to hugging its edges there. */
 .chart-gallery-nav {
   position: absolute;
   top: 50%;
@@ -934,18 +941,24 @@ body.chart-gallery-open {
   width: 2.5rem;
   height: 2.5rem;
   border-radius: 50%;
-  font-size: 1.3rem;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: var(--bg-elevated);
   box-shadow: var(--shadow);
 }
 
+.chart-gallery-nav svg {
+  width: 20px;
+  height: 20px;
+}
+
 .chart-gallery-nav-prev {
-  left: -0.25rem;
+  left: 1.5rem;
 }
 
 .chart-gallery-nav-next {
-  right: -0.25rem;
+  right: 1.5rem;
 }
 
 .chart-gallery-hint {
@@ -1075,6 +1088,17 @@ body.chart-gallery-open {
   margin: 2rem 0 0.5rem;
 }
 
+/* One level below the h3 section headings above ("Leg Profile") — groups
+   the Time/Track Distance/Crow-flies Distance chart pairs within it. */
+.chart-subsection-heading {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 1.5rem 0 0.35rem;
+}
+
 .finance-group {
   margin-top: 1.5rem;
 }
@@ -1183,11 +1207,16 @@ body.chart-gallery-open {
     padding: 0.75rem;
   }
 
+  /* Now positioned relative to .chart-gallery (see the base rule's
+     comment) instead of the panel — that's the same box on this narrow
+     breakpoint (panel goes full-bleed just above), so these need a bit
+     more inset than before to clear the chart's own y-axis labels, not
+     just .chart-gallery's own small padding. */
   .chart-gallery-nav-prev {
-    left: 0.25rem;
+    left: 0.75rem;
   }
 
   .chart-gallery-nav-next {
-    right: 0.25rem;
+    right: 0.75rem;
   }
 }

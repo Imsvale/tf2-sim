@@ -44,10 +44,10 @@ export function effectiveTrackDistance(leg) {
 }
 
 /** Time (s) and distance for one leg, given a train aggregate. Null if the leg has no crow distance yet. */
-export function legTime(aggregate, leg, trackSpeedLimit_kmh) {
+export function legTime(aggregate, leg, trackSpeedLimit_kmh, gravity_ms2) {
   const distance_m = effectiveTrackDistance(leg);
   if (distance_m == null) return null;
-  const result = simulate(aggregate, { trackSpeedLimit_kmh, stopAt: { distance_m } });
+  const result = simulate(aggregate, { trackSpeedLimit_kmh, stopAt: { distance_m }, gravity_ms2 });
   return result && !result.warning ? result.time_s : null;
 }
 
@@ -57,7 +57,7 @@ export function legTime(aggregate, leg, trackSpeedLimit_kmh) {
  * from an in-game time measurement when the actual track distance isn't
  * known (no in-game ruler needed).
  */
-export function estimateTrackDistance(aggregate, observedTime_s, trackSpeedLimit_kmh) {
-  const result = simulate(aggregate, { trackSpeedLimit_kmh, stopAt: { duration_s: observedTime_s } });
+export function estimateTrackDistance(aggregate, observedTime_s, trackSpeedLimit_kmh, gravity_ms2) {
+  const result = simulate(aggregate, { trackSpeedLimit_kmh, stopAt: { duration_s: observedTime_s }, gravity_ms2 });
   return result && !result.warning ? result.distance_m : null;
 }

@@ -34,6 +34,23 @@ throughout.
         as a side project — not needed if the formula is taken as correct.
   - [ ] Verify whether `g` in the rolling-resistance formula is really the
         full 9.81 m/s² once real numbers are available.
+    - [x] A "Gravity" control now exists for this specifically (Physics tab,
+          `state.gravity_ms2`, default 9.81) — threaded through every
+          physics call: `js/physics.js`'s `buildDynamics()` (and everything
+          built on it — `simulate()`, `simulateToStop()`, `forceAtSpeed()`,
+          `accelerationAtSpeed()`, `computeAccelerationStats()`), `js/route.js`'s
+          `legTime()`/`estimateTrackDistance()`, `js/finance.js`'s
+          `tripSummary()`, `js/charts.js`'s `renderCharts()`. Verified the
+          whole chain numerically (rolling resistance scales exactly
+          linearly with g as expected, default with no value passed exactly
+          matches explicit 9.81) and in a live browser across all three
+          affected tabs (Physics, Route, Finances). Unlike the tractive-
+          effort doubling (well-established, not in question — see above),
+          `g` is genuinely unconfirmed; this exists so different values can
+          be tried once real telemetry exists to compare against (see
+          `../tf2-watcher/CLAUDE.md`). Persisted and shareable
+          (`js/storage.js`, `js/shareLink.js`), same as track speed limit
+          and braking deceleration.
   - [x] Taper applies to net drive force, not to rolling resistance — the
         Force graph plots `F_effective(v) = R + (F_drive(v) − R) · (1 −
         taper(v))` rather than the raw (untapered) drive-force curve, so
@@ -357,6 +374,17 @@ throughout.
   - [x] Reference for other potentially interesting mechanics to explore
         later: Steam Workshop mods 3454209257 and 3238328414 (files under
         the Workshop folder in the user's SteamLibrary on the S: drive)
+  - [x] Two more Leg Profile charts: Average Speed vs Distance/Time
+        (`chart-route-avg-speed-distance`/`-time`) — cumulative distance
+        over cumulative time so far, from the same `simulateToStop()`
+        samples the two charts above already compute (no extra
+        simulation). Unlike those, it's one continuous curve per train
+        with no separate dashed braking segment — the average already
+        blends both phases smoothly (braking pulls it down the same way
+        accelerating pulls it up), so there's nothing separate to mark.
+        Motivated by wanting a general notion of a consist's break-even
+        average speed — see the "Break-even speed" note under Financial
+        features below
   - **Scope note (superseded — see "Whole-route timing" below):** this
         was originally additive/visual only, with `tripSummary()`
         unchanged. It's since been wired into financials too, behind an
@@ -469,6 +497,126 @@ throughout.
       more wagons/vehicles as money allows)
 - [ ] Loan/interest, once wired in (see "Game formulas" above for where its
       UI belongs)
+- [x] Break-even average speed for a given consist —
+      [docs/breakeven_formulas.md](../docs/breakeven_formulas.md) has the
+      full derivation. Key correction from an earlier pass at this: the
+      right quantity is **crow-flies** average speed (crowDistance / leg
+      time), not track-distance average speed — revenue is paid on crow
+      distance while maintenance is paid on however long the leg actually
+      takes, and there's only one time regardless of *why* it took that
+      long (longer track, a speed limit, anything). Track-distance average
+      speed is a real physical quantity but the wrong one for this
+      specifically. `js/finance.js`'s `breakEvenAverageSpeed_kmh(aggregate,
+      leg, options)` gives the *exact* break-even speed for a leg of known
+      crow distance, by asking `legRevenue()` for that leg's actual
+      revenue and solving `time = revenue/maintenanceRate` — no duplicated
+      formula. Verified both numerically (revenue - maintenance ≈ 0 at the
+      computed speed) and that it increases monotonically toward a stable
+      limit as distance grows, matching the derivation
+  - [x] Leg Profile reorganized into 3 subsections by what's on the
+        x-axis — Time, Track Distance, Crow-flies Distance
+        (`renderRouteProfileCharts()` in `js/charts.js`, 6 charts total,
+        one Speed/Average Speed pair per subsection) — was flat/ungrouped
+        before, and the initial single break-even chart's title
+        ("Crow-flies Average Speed vs Break-even") was simply wrong: it's
+        crow-flies average speed *vs Time*, with break-even marked as a
+        horizontal reference, not literally plotted against "break-even"
+        as an axis. Time's Average Speed is crow-flies (the break-even
+        quantity, dashed reference line per train — differs per train
+        since price/capacity/top-speed do); Track Distance's is the real
+        physical average, explicitly labeled as *not* the break-even
+        quantity. Crow-flies Distance mirrors Track Distance's pair but
+        against a virtual "crow-flies progress so far" x-axis (track
+        progress scaled by the leg's crow/track ratio) — acknowledged as a
+        bit of a stretch conceptually, kept anyway for the parallel
+        structure and because it still lands exactly on the true
+        crow-flies average at the leg's end. Both Speed (instantaneous)
+        charts — Track Distance's and Crow-flies Distance's — get a marker
+        point at wherever the crow-flies average first reaches break-even
+        (interpolated between samples, omitted if the leg never gets
+        there): the point being that *instantaneous* speed there is well
+        above the break-even threshold, only the average has caught up
+  - [x] Time subsection extended to 5 charts: Acceleration and Distance
+        (both Track and Crow-flies flavors) joined Speed and Average Speed.
+        Deliberately *not* pulling in Force-vs-Speed/Acceleration-vs-Speed
+        from the Physics tab too — those are pure functions of the
+        vehicle's own physics, identical regardless of which leg is
+        selected, so they'd show nothing new per leg (unlike Time/Distance-
+        based charts, which do vary with the leg). `simulateToStop()` in
+        `js/physics.js` gained an `a_ms2` field on its sample points to
+        support the new Acceleration chart — reuses the same `accel()`
+        already computed during the run/cruise phase, and is exactly
+        `-brakingDeceleration_ms2` (flat, matching the braking model
+        itself) throughout the brake phase; verified against a known-good
+        initial-acceleration figure and that brake-phase values are
+        constant. Distance (Crow-flies) reuses the same track-progress
+        scaling as everything else crow-flies-denominated in this
+        function. Verified in a live browser that the new charts'
+        endpoints cross-match the existing ones exactly (total leg time,
+        total leg distance) — they share the same underlying samples, so
+        any mismatch would mean a wiring bug, not just a display issue
+  - [x] The route/consist-independent **upper bound** (same derivation,
+        distance -> infinity) now has a home: a new "Experimental" tab
+        (deliberately named as a placeholder — this doesn't fit the
+        existing four tabs' "configure one specific consist+route and see
+        its numbers" pattern, since it's one abstract quantity varying
+        across wagon count, independent of any route). Table: one
+        locomotive + a growing wagon count of one wagon type (own
+        controls, not the Trains tab's consists — kept to the simple
+        single-wagon-type case for a first pass, not an arbitrary
+        multi-group train), columns = wagon count/capacity/price/
+        break-even upper bound. `js/finance.js`'s new
+        `breakEvenAverageSpeedUpperBound_kmh(aggregate, options)` computes
+        it exactly (not via a large-number approximation — revenue is
+        exactly linear in `(300 + crowDistance)` by construction, so any
+        placeholder distance gives the same constant with zero error),
+        verified against the earlier `breakEvenAverageSpeed_kmh` at a very
+        large distance. Real example run: break-even upper bound starts at
+        49.3 km/h for "1 locomotive + 1 wagon" and monotonically decreases,
+        converging to ~30.6 km/h by 20 wagons — the locomotive's own
+        price/capacity overhead dominates at low wagon counts, the wagon's
+        own economics take over as it scales up. Selections aren't
+        persisted yet (not part of `state`, resets to defaults each visit)
+  - [x] Three more derivations, proposed in discussion then built — all in
+        `js/finance.js`, all verified against real vehicle data before
+        wiring in (see each function's own comment for the exact check):
+      - `breakEvenLoadFactorUpperBound(aggregate, referenceSpeed_kmh,
+        options)` — not a new formula, `breakEvenAverageSpeedUpperBound_kmh`'s
+        own reciprocal (revenue is linear in load factor, so
+        `speedUpperBound(loadFactor) × loadFactor` is a constant regardless
+        of loadFactor). New Experimental-table column: load factor needed
+        to guarantee break-even if this train sustains its own top speed.
+        Round-trip verified: feeding the result back into
+        `breakEvenAverageSpeedUpperBound_kmh` reproduces the reference
+        speed exactly
+      - `profitPerRealHourAtSpeed` / `paybackPeriodRealHours` — the
+        "Profitability vs Time" idea from the same discussion, evaluated
+        as *not* worth its own chart (it's an affine transform of the
+        already-built Average Speed (Crow-flies) vs Time chart — same
+        shape, same zero-crossing, just relabeled km/h → $/s) but genuinely
+        useful once evaluated at a *fixed* speed instead of the crossing
+        point: `purchasePrice / profitPerRealHourAtSpeed(...)`, another new
+        Experimental-table column, at top speed and the load factor set
+        above. Verified profit is exactly 0 at the break-even speed itself,
+        and the direct division matches a from-scratch cross-check
+      - `breakEvenWagonCount(agg0, agg1, targetSpeed_kmh, options)` — the
+        "solvable in closed form" idea, actually solved in closed form
+        rather than scanning the table: price and capacity both scale
+        *exactly* linearly in wagon count (`aggregateTrain` just sums
+        quantity × per-vehicle values, confirmed against real data, not
+        assumed) and top speed doesn't move at all (adding more of the
+        *same* wagon type never changes which vehicle sets the train's own
+        `Math.min()` top speed) — so reading the per-wagon delta off N=0
+        and N=1 turns "when does the upper bound reach this target" into
+        one linear equation, not a search. New summary line above the
+        table ("break-even at ~N wagons"). Verified by constructing the
+        *exact* fractional-N aggregate the closed form implies and
+        confirming its own upper-bound speed lands on the target speed to
+        6 decimal places
+  - [ ] Considered: a global "track distance = crow distance × N%"
+        setting, to approximate route curvature's effect on maintenance
+        without having to measure real track distance (impractical to get
+        out of the game) — not started
 
 ## Persistence
 - [x] Full app state (trains, route incl. per-leg load factor, track speed

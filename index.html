@@ -27,6 +27,7 @@
       <button class="tab-btn" type="button" role="tab" data-tab="graphs" aria-selected="false" aria-controls="tab-graphs">Physics</button>
       <button class="tab-btn" type="button" role="tab" data-tab="route" aria-selected="false" aria-controls="tab-route">Route</button>
       <button class="tab-btn" type="button" role="tab" data-tab="financials" aria-selected="false" aria-controls="tab-financials">Finances</button>
+      <button class="tab-btn" type="button" role="tab" data-tab="experimental" aria-selected="false" aria-controls="tab-experimental">Experimental</button>
     </nav>
 
     <section id="tab-trains" class="tab-panel" role="tabpanel" aria-labelledby="trains-heading">
@@ -54,6 +55,15 @@
 
     <section id="tab-graphs" class="tab-panel" role="tabpanel" aria-labelledby="graphs-heading" hidden>
       <h2 id="graphs-heading">Physics</h2>
+      <div class="control-row">
+        <label for="gravity-input">Gravity</label>
+        <input id="gravity-input" type="number" min="0.1" step="0.01" value="9.81">
+      </div>
+      <p class="hint">
+        Used in the rolling-resistance formula below (affects every chart and table on this tab,
+        and anything derived from them elsewhere). Vanilla is assumed to be 9.81 m/s&sup2;, but
+        that's not confirmed — try other values against real in-game data.
+      </p>
 
       <section id="acceleration-section" hidden>
         <h3>Acceleration &amp; Travel Time</h3>
@@ -160,27 +170,102 @@
         Each train's full run for the selected leg alone: accelerate, cruise if there's room, then
         brake to a stop at the station. The dashed tail of each line is the braking phase.
       </p>
+
+      <h4 class="chart-subsection-heading">Time</h4>
+      <p class="hint">
+        Average speed here is <em>crow-flies</em> — the quantity that determines whether this leg is
+        profitable, since revenue is paid on crow-flies distance while maintenance is paid on time,
+        however that time is spent. Each train's own break-even speed for this leg is the dashed
+        line; crossing it means the leg has turned a profit.
+      </p>
       <div class="chart-grid">
         <div class="chart-card">
           <div class="chart-card-header">
-            <h3>Speed vs Distance</h3>
-            <button class="chart-maximize" type="button" data-chart-id="chart-route-speed-distance" title="Maximize" aria-label="Maximize Speed vs Distance"></button>
-          </div>
-          <div class="chart-canvas-wrap"><canvas id="chart-route-speed-distance"></canvas></div>
-        </div>
-        <div class="chart-card">
-          <div class="chart-card-header">
-            <h3>Speed vs Time</h3>
+            <h3>Speed</h3>
             <button class="chart-maximize" type="button" data-chart-id="chart-route-speed-time" title="Maximize" aria-label="Maximize Speed vs Time"></button>
           </div>
           <div class="chart-canvas-wrap"><canvas id="chart-route-speed-time"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-header">
+            <h3>Acceleration</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-route-accel-time" title="Maximize" aria-label="Maximize Acceleration vs Time"></button>
+          </div>
+          <div class="chart-canvas-wrap"><canvas id="chart-route-accel-time"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-header">
+            <h3>Distance (Track)</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-route-distance-track-time" title="Maximize" aria-label="Maximize Distance (Track) vs Time"></button>
+          </div>
+          <div class="chart-canvas-wrap"><canvas id="chart-route-distance-track-time"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-header">
+            <h3>Distance (Crow-flies)</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-route-distance-crow-time" title="Maximize" aria-label="Maximize Distance (Crow-flies) vs Time"></button>
+          </div>
+          <div class="chart-canvas-wrap"><canvas id="chart-route-distance-crow-time"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-header">
+            <h3>Average Speed (Crow-flies)</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-route-avgspeed-time" title="Maximize" aria-label="Maximize Average Speed (Crow-flies) vs Time"></button>
+          </div>
+          <div class="chart-canvas-wrap"><canvas id="chart-route-avgspeed-time"></canvas></div>
+        </div>
+      </div>
+
+      <h4 class="chart-subsection-heading">Track Distance</h4>
+      <p class="hint">
+        A real physical speed — how fast the train actually moved, on average, over the ground it
+        covered. Not the right quantity for a break-even judgment (see Crow-flies Distance below).
+      </p>
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="chart-card-header">
+            <h3>Speed</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-route-speed-track" title="Maximize" aria-label="Maximize Speed vs Track Distance"></button>
+          </div>
+          <div class="chart-canvas-wrap"><canvas id="chart-route-speed-track"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-header">
+            <h3>Average Speed</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-route-avgspeed-track" title="Maximize" aria-label="Maximize Average Speed vs Track Distance"></button>
+          </div>
+          <div class="chart-canvas-wrap"><canvas id="chart-route-avgspeed-track"></canvas></div>
+        </div>
+      </div>
+
+      <h4 class="chart-subsection-heading">Crow-flies Distance</h4>
+      <p class="hint">
+        Crow-flies distance isn't something a train actually travels along — these use track progress
+        scaled to land on the leg's true crow-flies distance at the end. The marked point is where the
+        crow-flies average first reaches break-even; the train's actual (instantaneous) speed there is
+        well above that threshold — only the average has caught up.
+      </p>
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="chart-card-header">
+            <h3>Speed</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-route-speed-crow" title="Maximize" aria-label="Maximize Speed vs Crow-flies Distance"></button>
+          </div>
+          <div class="chart-canvas-wrap"><canvas id="chart-route-speed-crow"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-header">
+            <h3>Average Speed</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-route-avgspeed-crow" title="Maximize" aria-label="Maximize Average Speed vs Crow-flies Distance"></button>
+          </div>
+          <div class="chart-canvas-wrap"><canvas id="chart-route-avgspeed-crow"></canvas></div>
         </div>
       </div>
 
       <h3>Whole Route</h3>
       <p class="hint">
         The entire loop, every leg back to back, including braking into each station and the
-        loading/unloading dwell there. The flat stretches are stops.
+        loading/unloading dwell there.
       </p>
       <div class="chart-grid">
         <div class="chart-card">
@@ -264,6 +349,43 @@
         </div>
       </div>
     </section>
+
+    <section id="tab-experimental" class="tab-panel" role="tabpanel" aria-labelledby="experimental-heading" hidden>
+      <h2 id="experimental-heading">Experimental</h2>
+      <p class="hint">
+        Work in progress. The break-even average speed (crow-flies) <strong>upper bound</strong> for
+        one locomotive plus a growing number of wagons — independent of any specific route (see
+        <a href="docs/breakeven_formulas.md">breakeven_formulas.md</a>). Clearing this speed
+        guarantees profitability on a leg of <em>any</em> distance whatsoever. Selections here aren't
+        saved between visits yet.
+      </p>
+      <div class="control-row">
+        <label for="experiment-locomotive-select">Locomotive</label>
+        <select id="experiment-locomotive-select"></select>
+        <label for="experiment-wagon-select">Wagon</label>
+        <select id="experiment-wagon-select"></select>
+        <label for="experiment-load-factor-input">Load</label>
+        <input id="experiment-load-factor-input" type="number" min="0" max="100" value="100">
+        <label for="experiment-max-wagons-input">Max wagons</label>
+        <input id="experiment-max-wagons-input" type="number" min="1" max="100" value="20">
+      </div>
+      <p id="experiment-wagon-count-summary" class="hint"></p>
+      <div class="table-wrap">
+        <table id="experiment-table" class="compare-table">
+          <thead>
+            <tr>
+              <th>Wagons</th>
+              <th>Capacity</th>
+              <th>Price</th>
+              <th>Break-even speed<br>(upper bound, this load)</th>
+              <th><span class="info-tooltip" title="The load factor needed to guarantee break-even on any distance, if this train sustains its own top speed the whole way.">Load needed</span><br>(at top speed)</th>
+              <th><span class="info-tooltip" title="Real hours to earn back this train's purchase price, sustaining its own top speed at the load factor set above, on an arbitrarily long route.">Payback period</span><br>(at top speed, this load)</th>
+            </tr>
+          </thead>
+          <tbody id="experiment-table-body"></tbody>
+        </table>
+      </div>
+    </section>
   </main>
 
   <footer class="site-footer">
@@ -272,6 +394,7 @@
   </footer>
 
   <div id="chart-gallery" class="chart-gallery" hidden>
+    <button id="chart-gallery-prev" class="chart-gallery-nav chart-gallery-nav-prev" type="button" title="Previous graph" aria-label="Previous graph"></button>
     <div id="chart-gallery-panel" class="chart-gallery-panel">
       <div class="chart-gallery-toolbar">
         <h3 id="chart-gallery-title" class="chart-gallery-title"></h3>
@@ -282,12 +405,11 @@
         </div>
       </div>
       <div class="chart-gallery-body">
-        <button id="chart-gallery-prev" class="chart-gallery-nav chart-gallery-nav-prev" type="button" title="Previous graph" aria-label="Previous graph">‹</button>
         <div class="chart-canvas-wrap"><canvas id="chart-gallery-canvas"></canvas></div>
-        <button id="chart-gallery-next" class="chart-gallery-nav chart-gallery-nav-next" type="button" title="Next graph" aria-label="Next graph">›</button>
       </div>
       <p class="chart-gallery-hint">Scroll to zoom, drag to pan, ←/→ to navigate, Esc to close.</p>
     </div>
+    <button id="chart-gallery-next" class="chart-gallery-nav chart-gallery-nav-next" type="button" title="Next graph" aria-label="Next graph"></button>
   </div>
 
   <script src="vendor/chart.umd.min.js"></script>

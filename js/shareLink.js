@@ -24,6 +24,7 @@ const SHAREABLE_FIELDS = [
   "route",
   "trackSpeedLimit_kmh",
   "brakingDeceleration_ms2",
+  "gravity_ms2",
   "difficultyKey",
   "includeStopsInFinancials",
   "selectedLegIndex",
