@@ -89,6 +89,24 @@ export function isEmpty(train) {
 }
 
 /**
+ * One locomotive + a growing wagon count of one wagon type — the simple
+ * "single wagon type" consist shape shared by js/main.js's Experimental
+ * table and js/company.js's simulator (both explore "one locomotive, N of
+ * one wagon" rather than an arbitrary multi-group train). Returns a
+ * `wagonCount => aggregate|null` closure so the caller can cheaply build
+ * several sizes of the same consist without re-specifying the vehicle ids
+ * each time.
+ */
+export function buildSingleWagonTypeTrain(locomotiveId, wagonId, vehicleById) {
+  return (wagonCount) => {
+    const train = createTrain();
+    insertLocomotive(train, 0, locomotiveId, 1);
+    if (wagonCount > 0) insertWagon(train, 0, wagonId, wagonCount);
+    return aggregateTrain(train, vehicleById);
+  };
+}
+
+/**
  * Aggregates a train's consist into the flat shape js/physics.js and
  * js/finance.js expect. Returns null if the train has no vehicles yet, or
  * references a vehicle id not present in `vehicleById` (stale selection).

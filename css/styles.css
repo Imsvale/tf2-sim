@@ -978,6 +978,14 @@ body.chart-gallery-open {
   margin: 1rem 0 0.5rem;
 }
 
+/* Same reasoning as .warning-banner[hidden] elsewhere in this file:
+   `display: flex` above otherwise beats the browser's default
+   `[hidden] { display: none }` rule (author styles win over the UA
+   stylesheet) — see index.html's now-hidden Gravity control-row. */
+.control-row[hidden] {
+  display: none;
+}
+
 .control-row label {
   font-size: 0.85rem;
   color: var(--text-muted);

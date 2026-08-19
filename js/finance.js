@@ -13,7 +13,9 @@ export const DIFFICULTY_FACTORS = {
 };
 
 const MILLIS_PER_DAY = 2000;
-const REAL_SECONDS_PER_GAME_YEAR = 730; // 2s/game-day * 365 days; see docs/revenue_formulas.md
+// Exported: js/company.js derives "1 month" from this too (a flat 1/12 of
+// a game year), rather than duplicating the constant and risking drift.
+export const REAL_SECONDS_PER_GAME_YEAR = 730; // 2s/game-day * 365 days; see docs/revenue_formulas.md
 const REAL_SECONDS_PER_GAME_YEAR_AVG = 730.5; // using 365.25-day average
 
 // Maintenance rate while stopped at a station (loading/unloading), as a

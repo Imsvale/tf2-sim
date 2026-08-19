@@ -27,14 +27,12 @@ throughout.
         force-limited, power-limited, and tapered phases in one RK4
         integration, replacing the old closed-form/log-fit split. Also fixes
         a latent bug where nonzero initial speed distance was approximated.
-  - [ ] Optional/someday: a Lua script logging in-game speed at high
-        precision (0 → top speed) would let distance be computed by
-        integrating the speed trace instead of an in-game ruler measurement,
-        and could re-validate the whole model, not just endpoints. Shelved
-        as a side project — not needed if the formula is taken as correct.
-  - [ ] Verify whether `g` in the rolling-resistance formula is really the
-        full 9.81 m/s² once real numbers are available.
-    - [x] A "Gravity" control now exists for this specifically (Physics tab,
+  - [x] `g` in the rolling-resistance formula confirmed as the full
+        9.81 m/s² — swept `0.1g` through `2.0g` in `0.1g` steps against real
+        tf2-watcher captures; `1.0g` is clearly the best fit, not just
+        "close enough among the alternatives tried." Same confidence level
+        as the tractive-effort doubling now.
+    - [x] A "Gravity" control exists for this (Physics tab,
           `state.gravity_ms2`, default 9.81) — threaded through every
           physics call: `js/physics.js`'s `buildDynamics()` (and everything
           built on it — `simulate()`, `simulateToStop()`, `forceAtSpeed()`,
@@ -44,13 +42,12 @@ throughout.
           whole chain numerically (rolling resistance scales exactly
           linearly with g as expected, default with no value passed exactly
           matches explicit 9.81) and in a live browser across all three
-          affected tabs (Physics, Route, Finances). Unlike the tractive-
-          effort doubling (well-established, not in question — see above),
-          `g` is genuinely unconfirmed; this exists so different values can
-          be tried once real telemetry exists to compare against (see
-          `../tf2-watcher/CLAUDE.md`). Persisted and shareable
+          affected tabs (Physics, Route, Finances). Persisted and shareable
           (`js/storage.js`, `js/shareLink.js`), same as track speed limit
-          and braking deceleration.
+          and braking deceleration. Now that `g` is confirmed, the control
+          itself is hidden (`index.html`'s `.control-row`) — state, storage,
+          and every physics call it threads through are untouched, so it
+          costs nothing to bring back if it's ever needed again.
   - [x] Taper applies to net drive force, not to rolling resistance — the
         Force graph plots `F_effective(v) = R + (F_drive(v) − R) · (1 −
         taper(v))` rather than the raw (untapered) drive-force curve, so
@@ -100,11 +97,11 @@ throughout.
 - [x] Revenue formula (per passenger/cargo payment) — [docs/revenue_formulas.md](docs/revenue_formulas.md), `js/finance.js`
 - [x] Maintenance formula wired in (`js/finance.js`, "fixed over time" —
       always the operating rate, no station/depot state modeling)
-- [ ] Loan and interest simulation (1% p.a., charged monthly, per
-      docs/cost_formulas.md) — documented but not implemented. Once built, the
-      loan amount is a single company-wide value (not per-vehicle/leg), so it
-      belongs as a small global-settings widget on the Trains tab, not its own
-      tab — decided when discussing the tab layout, see below.
+- [x] Loan and interest simulation (1% p.a., charged monthly, per
+      docs/cost_formulas.md) — see the new Company tab under Financial
+      features below. **Supersedes** the earlier "small global-settings
+      widget on the Trains tab" decision noted here previously — a full
+      discrete-event simulation turned out to need its own tab after all.
 - [ ] Aircraft acceleration model (thrust-based — distinct from rail's
       tractive-effort model)
 
@@ -360,7 +357,9 @@ throughout.
         accumulates float error further with every tick) to computing each
         tick independently as `anchor + k*step`, so there's less noise to
         clean up in the first place
-- [ ] Profit-over-time graph, once a financial simulation (below) exists
+- [x] Profit-over-time graph — see the Company tab's "Net Worth over Time"
+      chart under Financial features below (net worth, not raw profit —
+      see that entry for why).
 - [x] Route graphs: each train's full door-to-door profile for one
       selected leg — accelerate, cruise if the leg's long enough, then
       **brake to a stop at the station**, plotted as Speed vs Distance and
@@ -547,10 +546,76 @@ throughout.
       `profitPerGameYear` — those already just consume whatever time/
       maintenance each leg reports. Revenue is untouched either way
       (`legRevenue()` was never time-based)
-- [ ] Financial simulation over time (e.g. accumulate profit, optionally buy
-      more wagons/vehicles as money allows)
-- [ ] Loan/interest, once wired in (see "Game formulas" above for where its
-      UI belongs)
+- [x] Financial simulation over time, loan/interest, and a company-value
+      growth-curve comparison — new **Company tab**, `js/company.js`'s
+      `simulateCompany()`. One locomotive + a growing count of one wagon
+      type, run on the Route tab's route, as a discrete-event simulation:
+      revenue posts at each leg completion (reusing `tripSummary()`'s own
+      per-leg time/revenue as the event schedule, cycled — no separate
+      leg-timing model), maintenance and loan interest are charged
+      together at each monthly tick (both counted from the moment the
+      initial train is bought, `annualMaintenance(aggregate)/12` +
+      `loanBalance * 0.01/12`, flat non-compounding interest per
+      docs/cost_formulas.md). The loan draws/repays only in exact
+      $500,000 steps (a smaller amount can't make a payment), and is
+      capped at simulation start by a starting-year-dependent schedule
+      mirroring TF2's own ($10M from 1850, $30M from 1900, $100M from
+      1950 — `loanCapForYear()`).
+  - [x] Two reinvestment strategies simulated side by side so their net
+        worth trajectories can be charted together (the "clear growth
+        curve comparison" for why paying off the loan early is usually
+        the financially worse move): **reinvest** spends every affordable
+        dollar on another wagon and never touches the loan; **pay off
+        first** puts everything toward the loan in $500k steps and buys
+        zero wagons until it's fully repaid (strict — a sub-$500k amount
+        that could afford a wagon still just waits), then behaves
+        identically to reinvest from that point on. Buying a wagon
+        rebuilds the aggregate/`tripSummary` and reschedules the next
+        leg's completion time from the current moment — takes effect at
+        the start of the next leg, never mid-leg.
+  - [x] Net worth (not raw cash) is what's tracked and charted —
+        `cash - loanBalance + fleetAssetValue` (fleet at undepreciated
+        purchase price) — so buying a wagon doesn't itself make the line
+        visibly dip, since cash converts to an asset of equal value
+        rather than disappearing.
+  - [x] `js/train.js` gained `buildSingleWagonTypeTrain()`, factored out
+        of what was `js/main.js`'s inline `trainWith()` closure inside
+        `renderExperimentalTable()` — the "one locomotive + N of one
+        wagon" consist shape is now shared between the Experimental table
+        and the Company simulator instead of duplicated.
+  - [x] Verified with a Node-level trace (not just in-browser) against a
+        real vehicle/route pair: leg revenue matches `tripSummary()`'s own
+        numbers exactly; loan balance only ever changes in exact $500k
+        multiples; `reinvest`'s loan balance never moves from its
+        starting value; `payoff` never buys a wagon while its own
+        resulting loan balance is still positive; a strategy's cash *can*
+        legitimately go temporarily negative near the end of a paydown
+        cycle (a real, informative outcome — not a bug, not prevented).
+  - [x] **Correction:** the Company tab originally also had its own "Load
+        %" control (`state.companyLoadFactor`), mirroring the
+        Experimental tab's. Removed — unlike difficulty (a genuine global
+        setting, see the two-selects note above), load is a *per-leg*
+        property already set on the Route tab (`leg.loadFactor`), and
+        `tripSummary()`/`legRevenue()` already read each leg's own value
+        directly. The Company control was inert (`simulateCompany()`
+        destructured a `loadFactor` param it never referenced) and, had
+        it been wired up, would have wrongly overridden real per-leg data
+        with a single global number.
+  - [ ] **Future reorganization (not started, substantial):** a
+        Simple/Advanced mode split — Simple is today's app as-is (Trains/
+        Physics/Route/Finances, single implicit route, no loan); Advanced
+        unlocks a **Line Manager** (Route generalized to reusable, sharable
+        **Line**s) and three-tier finances (vehicle/line/company), with
+        Company as the top-level wrapper (loan + infrastructure cost, not
+        today's tab). Full design discussion, open questions (gradient
+        modeling as a possible prerequisite, per-vehicle vs. calendar
+        maintenance accrual, one-time vs. recurring infrastructure spend),
+        and what's already decided:
+        [docs/company_mode_design.md](docs/company_mode_design.md).
+        Explicitly deferred and still taking shape — flagged alongside a
+        live open question about how elaborate this app should get before
+        it stops being accessible for the simple case (comparing a couple
+        of trains).
 - [x] Break-even average speed for a given consist —
       [docs/breakeven_formulas.md](../docs/breakeven_formulas.md) has the
       full derivation. Key correction from an earlier pass at this: the

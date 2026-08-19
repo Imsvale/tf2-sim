@@ -28,6 +28,7 @@
       <button class="tab-btn" type="button" role="tab" data-tab="route" aria-selected="false" aria-controls="tab-route">Route</button>
       <button class="tab-btn" type="button" role="tab" data-tab="financials" aria-selected="false" aria-controls="tab-financials">Finances</button>
       <button class="tab-btn" type="button" role="tab" data-tab="experimental" aria-selected="false" aria-controls="tab-experimental">Experimental</button>
+      <button class="tab-btn" type="button" role="tab" data-tab="company" aria-selected="false" aria-controls="tab-company">Company</button>
     </nav>
 
     <section id="tab-trains" class="tab-panel" role="tabpanel" aria-labelledby="trains-heading">
@@ -55,15 +56,15 @@
 
     <section id="tab-graphs" class="tab-panel" role="tabpanel" aria-labelledby="graphs-heading" hidden>
       <h2 id="graphs-heading">Physics</h2>
-      <div class="control-row">
+      <!-- Hidden, not removed: g=9.81 is now confirmed (tf2-watcher captures,
+           tried against 0-2g in 0.1g steps — 1g is clearly the best fit), so
+           there's no live reason to expose this control. state.gravity_ms2
+           and every physics call it threads through are untouched — this is
+           presentation-only, in case a future need for it turns up. -->
+      <div class="control-row" hidden>
         <label for="gravity-input">Gravity</label>
         <input id="gravity-input" type="number" min="0.1" step="0.01" value="9.81">
       </div>
-      <p class="hint">
-        Used in the rolling-resistance formula below (affects every chart and table on this tab,
-        and anything derived from them elsewhere). Vanilla is assumed to be 9.81 m/s&sup2;, but
-        that's not confirmed — try other values against real in-game data.
-      </p>
 
       <section id="acceleration-section" hidden>
         <h3>Acceleration &amp; Travel Time</h3>
@@ -362,6 +363,62 @@
           <tbody id="experiment-table-body"></tbody>
         </table>
       </div>
+    </section>
+
+    <section id="tab-company" class="tab-panel" role="tabpanel" aria-labelledby="company-heading" hidden>
+      <h2 id="company-heading">Company</h2>
+      <p class="hint">
+        One locomotive plus a growing number of one wagon type, run on the route configured on the
+        Route tab, over real simulated years. Revenue posts each time a leg completes; maintenance
+        and loan interest are charged every month, both counted from the moment the initial train is
+        bought. The loan can only be drawn or repaid in exact $500,000 steps — a smaller amount just
+        can't make a payment. Two strategies are simulated side by side: <strong>reinvest</strong>
+        spends every affordable dollar on another wagon and never touches the loan;
+        <strong>pay off first</strong> puts everything toward the loan instead, in $500k steps, and
+        buys no wagons at all until it's fully repaid — then behaves exactly like reinvest from that
+        point on.
+      </p>
+      <div class="control-row">
+        <label for="company-locomotive-select">Locomotive</label>
+        <select id="company-locomotive-select"></select>
+        <label for="company-wagon-select">Wagon</label>
+        <select id="company-wagon-select"></select>
+        <label for="company-difficulty-select">Difficulty</label>
+        <select id="company-difficulty-select">
+          <option value="easy" selected>Easy (100%)</option>
+          <option value="medium">Medium (80%)</option>
+          <option value="hard">Hard (60%)</option>
+          <option value="veryHard">Very Hard (40%)</option>
+        </select>
+        <label for="company-initial-wagons-input">Starting wagons</label>
+        <input id="company-initial-wagons-input" type="number" min="0" max="100" value="1">
+      </div>
+      <div class="control-row">
+        <label for="company-starting-year-input"><span class="info-tooltip" title="Determines the loan cap below: $10M from 1850, $30M from 1900, $100M from 1950.">Starting year</span></label>
+        <input id="company-starting-year-input" type="number" min="1850" max="2000" step="1" value="1850">
+        <label for="company-starting-cash-input">Starting cash</label>
+        <input id="company-starting-cash-input" type="number" min="0" step="100000" value="0">
+        <label for="company-starting-loan-input"><span class="info-tooltip" title="Snapped to the nearest $500,000 and capped at the starting year's loan limit.">Starting loan</span></label>
+        <input id="company-starting-loan-input" type="number" min="0" step="500000" value="10000000">
+      </div>
+      <div class="control-row">
+        <label for="company-max-wagons-input">Max wagons</label>
+        <input id="company-max-wagons-input" type="number" min="1" max="200" value="20">
+        <label for="company-simulation-years-input">Simulate for</label>
+        <input id="company-simulation-years-input" type="number" min="1" max="150" value="50">
+        <span class="hint">years</span>
+      </div>
+      <p id="company-warning" class="hint" hidden></p>
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="chart-card-header">
+            <h3>Net Worth over Time</h3>
+            <button class="chart-maximize" type="button" data-chart-id="chart-company-networth" title="Maximize" aria-label="Maximize Net Worth over Time"></button>
+          </div>
+          <div class="chart-canvas-wrap"><canvas id="chart-company-networth"></canvas></div>
+        </div>
+      </div>
+      <p id="company-summary" class="hint"></p>
     </section>
   </main>
 

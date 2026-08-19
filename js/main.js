@@ -12,6 +12,7 @@ import {
   setLocomotiveTypeAt,
   setWagonTypeAt,
   aggregateTrain,
+  buildSingleWagonTypeTrain,
   TRAIN_SPEC_FIELDS,
   formatTrainSpecValue,
 } from "./train.js";
@@ -24,8 +25,18 @@ import {
   breakEvenLoadFactorUpperBound,
   paybackPeriodRealHours,
   breakEvenWagonCount,
+  REAL_SECONDS_PER_GAME_YEAR,
 } from "./finance.js";
-import { renderCharts, renderFinanceCharts, renderRouteProfileCharts, renderRouteProfileChartsForRoute, SERIES_SLOTS, seriesColor } from "./charts.js";
+import { simulateCompany, loanCapForYear, LOAN_INCREMENT } from "./company.js";
+import {
+  renderCharts,
+  renderFinanceCharts,
+  renderRouteProfileCharts,
+  renderRouteProfileChartsForRoute,
+  renderCompanyChart,
+  SERIES_SLOTS,
+  seriesColor,
+} from "./charts.js";
 import { initChartGallery } from "./chartGallery.js";
 import { saveState, loadState, validateState } from "./storage.js";
 import { decodeShareHash, buildShareUrl } from "./shareLink.js";
@@ -47,6 +58,18 @@ const state = {
   financeGroupBy: "metric",
   chipView: "compact",
   activeTab: "trains",
+
+  // Company tab — see js/company.js's simulateCompany(). Locomotive/wagon
+  // default to null until initCompanyControls() picks a real vehicle
+  // (vehicles load async, same as experimentState).
+  companyLocomotiveId: null,
+  companyWagonId: null,
+  companyInitialWagonCount: 1,
+  companyStartingYear: 1850,
+  companyStartingCash: 0,
+  companyStartingLoan: 10_000_000, // loanCapForYear(1850) — kept as a literal here since state's default must exist before company.js's default-vehicle-dependent init runs
+  companyMaxWagons: 20,
+  companySimulationYears: 50,
 };
 
 // ---- helpers ----
@@ -1206,6 +1229,18 @@ function initExperimentalControls() {
   wrapExistingNumberField(maxWagonsInput, {});
 }
 
+// Break-even speed above top speed, load needed over 100%, and payback
+// never — all three are the same underlying fact (this consist can't earn
+// enough to cover its own maintenance under the stated assumptions), so
+// all three read the same flat way rather than a precise-looking number
+// that's really just a different spelling of "no". The tooltip is where
+// each column's own specific reason lives.
+function markImpossible(td, explanation) {
+  td.textContent = "Impossible";
+  td.classList.add("info-tooltip");
+  td.title = explanation;
+}
+
 // One locomotive + a growing wagon count of one wagon type — see the tab's
 // own hint text for why this is intentionally the simple case (a single
 // wagon type, not an arbitrary multi-group train) for a first pass at this.
@@ -1217,13 +1252,7 @@ function renderExperimentalTable() {
   if (!experimentState.locomotiveId || !experimentState.wagonId) return;
 
   const options = { difficulty: DIFFICULTY_FACTORS[state.difficultyKey], loadFactor: experimentState.loadFactor };
-
-  const trainWith = (wagonCount) => {
-    const train = createTrain();
-    insertLocomotive(train, 0, experimentState.locomotiveId, 1);
-    if (wagonCount > 0) insertWagon(train, 0, experimentState.wagonId, wagonCount);
-    return aggregateTrain(train, state.vehicleById);
-  };
+  const trainWith = buildSingleWagonTypeTrain(experimentState.locomotiveId, experimentState.wagonId, state.vehicleById);
 
   // breakEvenWagonCount needs the locomotive-alone and +1-wagon points to
   // read off this wagon type's own per-unit price/capacity contribution —
@@ -1237,7 +1266,7 @@ function renderExperimentalTable() {
     if (N === 0) {
       summaryEl.textContent = `Break-even at 0 wagons — the locomotive alone already guarantees profit at its own top speed (${target_kmh} km/h, ${Math.round(experimentState.loadFactor * 100)}% load), on any distance.`;
     } else if (N != null) {
-      summaryEl.textContent = `Break-even at ~${N.toFixed(1)} wagons — the fewest (fractional; round up) needed for this locomotive's own top speed (${target_kmh} km/h) to guarantee profit at ${Math.round(experimentState.loadFactor * 100)}% load, on any distance.`;
+      summaryEl.textContent = `Break-even at ~${N.toFixed(0)} wagons — the fewest (fractional; round up) needed for this locomotive's own top speed (${target_kmh} km/h) to guarantee profit at ${Math.round(experimentState.loadFactor * 100)}% load, on any distance.`;
     } else {
       summaryEl.textContent = `This wagon never gets there: adding more doesn't bring the break-even upper bound down to this locomotive's own top speed (${target_kmh} km/h) at ${Math.round(experimentState.loadFactor * 100)}% load.`;
     }
@@ -1258,15 +1287,187 @@ function renderExperimentalTable() {
     capacityTd.textContent = aggregate.passengerCapacity + aggregate.cargoCapacity;
     const priceTd = document.createElement("td");
     priceTd.textContent = formatMoneyCompact(aggregate.price);
+    const loadPct = Math.round(experimentState.loadFactor * 100);
+
     const speedTd = document.createElement("td");
-    speedTd.textContent = upperBound_kmh != null ? `${upperBound_kmh.toFixed(1)} km/h` : "—";
+    if (upperBound_kmh != null && upperBound_kmh > aggregate.topSpeed_kmh) {
+      markImpossible(
+        speedTd,
+        `Break-even speed greater than top speed of ${aggregate.topSpeed_kmh} km/h — not possible.`
+      );
+    } else {
+      speedTd.textContent = upperBound_kmh != null ? `${upperBound_kmh.toFixed(1)} km/h` : "—";
+    }
+
     const loadTd = document.createElement("td");
-    loadTd.textContent = requiredLoad != null ? `${(requiredLoad * 100).toFixed(0)}%` : "—";
+    if (requiredLoad != null && requiredLoad > 1) {
+      markImpossible(
+        loadTd,
+        "Required load greater than 100% – not possible."
+      );
+    } else {
+      loadTd.textContent = requiredLoad != null ? `${(requiredLoad * 100).toFixed(0)}%` : "—";
+    }
+
     const paybackTd = document.createElement("td");
-    paybackTd.textContent = payback_h != null ? `${payback_h < 1 ? payback_h.toFixed(2) : payback_h.toFixed(1)} h` : "never";
+    if (payback_h != null) {
+      paybackTd.textContent = `${payback_h < 1 ? payback_h.toFixed(2) : payback_h.toFixed(1)} h`;
+    } else {
+      markImpossible(
+        paybackTd,
+        `This consist fails to make a profit even in the best case, so payback is not possible.`
+      );
+    }
     row.append(wagonsTd, capacityTd, priceTd, speedTd, loadTd, paybackTd);
     body.appendChild(row);
   }
+}
+
+function initCompanyControls() {
+  const locoSelect = document.getElementById("company-locomotive-select");
+  const wagonSelect = document.getElementById("company-wagon-select");
+  populateSelectOptions(locoSelect, locomotivesOf(state.vehicles));
+  populateSelectOptions(wagonSelect, wagonsOf(state.vehicles));
+  if (!state.companyLocomotiveId) state.companyLocomotiveId = defaultLocomotive()?.id ?? null;
+  if (!state.companyWagonId) state.companyWagonId = defaultWagon()?.id ?? null;
+  if (state.companyLocomotiveId) locoSelect.value = state.companyLocomotiveId;
+  if (state.companyWagonId) wagonSelect.value = state.companyWagonId;
+
+  locoSelect.addEventListener("change", () => {
+    state.companyLocomotiveId = locoSelect.value;
+    recompute();
+  });
+  wagonSelect.addEventListener("change", () => {
+    state.companyWagonId = wagonSelect.value;
+    recompute();
+  });
+
+  // A second knob on the same global state.difficultyKey the Finances
+  // tab's own difficulty-select already controls — not a company-specific
+  // setting, just a convenience so switching tabs isn't required to try a
+  // different difficulty while working here. recomputeNow() keeps both
+  // selects' displayed value in sync with each other either way.
+  const difficultySelect = document.getElementById("company-difficulty-select");
+  difficultySelect.value = state.difficultyKey;
+  difficultySelect.addEventListener("change", () => {
+    state.difficultyKey = difficultySelect.value;
+    recompute();
+  });
+
+  const initialWagonsInput = document.getElementById("company-initial-wagons-input");
+  initialWagonsInput.value = state.companyInitialWagonCount;
+  initialWagonsInput.addEventListener("change", () => {
+    state.companyInitialWagonCount = Math.max(0, Math.floor(Number(initialWagonsInput.value)) || 0);
+    initialWagonsInput.value = state.companyInitialWagonCount;
+    recompute();
+  });
+  wrapExistingNumberField(initialWagonsInput, {});
+
+  const yearInput = document.getElementById("company-starting-year-input");
+  const loanInput = document.getElementById("company-starting-loan-input");
+  yearInput.value = state.companyStartingYear;
+
+  // Shared by the year and loan inputs' own handlers, and by init below (to
+  // normalize a loaded/shared state whose loan doesn't match its year's
+  // cap) — snaps to the nearest $500k step, then clamps into
+  // [0, loanCapForYear(year)].
+  const clampLoanToCap = () => {
+    const cap = loanCapForYear(state.companyStartingYear);
+    const snapped = Math.round(state.companyStartingLoan / LOAN_INCREMENT) * LOAN_INCREMENT;
+    state.companyStartingLoan = Math.max(0, Math.min(cap, snapped));
+    loanInput.max = cap;
+    loanInput.value = state.companyStartingLoan;
+  };
+
+  yearInput.addEventListener("change", () => {
+    state.companyStartingYear = Math.max(1850, Math.min(2000, Math.round(Number(yearInput.value)) || 1850));
+    yearInput.value = state.companyStartingYear;
+    clampLoanToCap();
+    recompute();
+  });
+  wrapExistingNumberField(yearInput, {});
+
+  const cashInput = document.getElementById("company-starting-cash-input");
+  cashInput.value = state.companyStartingCash;
+  cashInput.addEventListener("change", () => {
+    state.companyStartingCash = Math.max(0, Number(cashInput.value) || 0);
+    cashInput.value = state.companyStartingCash;
+    recompute();
+  });
+  wrapExistingNumberField(cashInput, { step: 100_000, widthCh: 10 });
+
+  loanInput.addEventListener("change", () => {
+    state.companyStartingLoan = Math.max(0, Number(loanInput.value) || 0);
+    clampLoanToCap();
+    recompute();
+  });
+  wrapExistingNumberField(loanInput, { step: LOAN_INCREMENT, widthCh: 10 });
+
+  clampLoanToCap(); // sets loanInput's initial value too, normalizing whatever loadState() handed back
+
+  const maxWagonsInput = document.getElementById("company-max-wagons-input");
+  maxWagonsInput.value = state.companyMaxWagons;
+  maxWagonsInput.addEventListener("change", () => {
+    state.companyMaxWagons = Math.max(1, Math.floor(Number(maxWagonsInput.value)) || 1);
+    maxWagonsInput.value = state.companyMaxWagons;
+    recompute();
+  });
+  wrapExistingNumberField(maxWagonsInput, {});
+
+  const yearsInput = document.getElementById("company-simulation-years-input");
+  yearsInput.value = state.companySimulationYears;
+  yearsInput.addEventListener("change", () => {
+    state.companySimulationYears = Math.max(1, Math.floor(Number(yearsInput.value)) || 1);
+    yearsInput.value = state.companySimulationYears;
+    recompute();
+  });
+  wrapExistingNumberField(yearsInput, {});
+}
+
+function renderCompanyTab() {
+  const warningEl = document.getElementById("company-warning");
+  const summaryEl = document.getElementById("company-summary");
+  warningEl.hidden = true;
+  warningEl.textContent = "";
+  summaryEl.textContent = "";
+  if (!state.companyLocomotiveId || !state.companyWagonId) return;
+
+  const simOptions = {
+    locomotiveId: state.companyLocomotiveId,
+    wagonId: state.companyWagonId,
+    vehicleById: state.vehicleById,
+    route: state.route,
+    initialWagonCount: state.companyInitialWagonCount,
+    startingCash: state.companyStartingCash,
+    startingLoan: state.companyStartingLoan,
+    maxWagons: state.companyMaxWagons,
+    simulationYears: state.companySimulationYears,
+    difficulty: DIFFICULTY_FACTORS[state.difficultyKey],
+    yearBasis: "standard",
+    trackSpeedLimit_kmh: state.trackSpeedLimit_kmh,
+    gravity_ms2: state.gravity_ms2,
+  };
+
+  const reinvestPoints = simulateCompany({ ...simOptions, strategy: "reinvest" });
+  const payoffPoints = simulateCompany({ ...simOptions, strategy: "payoff" });
+  renderCompanyChart(reinvestPoints, payoffPoints, state.companyStartingYear, REAL_SECONDS_PER_GAME_YEAR);
+
+  if (!reinvestPoints || !payoffPoints) {
+    warningEl.hidden = false;
+    warningEl.textContent =
+      "This scenario can't even afford its starting train — starting cash + starting loan needs to cover the initial purchase price.";
+    return;
+  }
+
+  const describe = (label, points) => {
+    const last = points[points.length - 1];
+    return `${label}: ${last.wagonCount} wagons, ${formatMoneyCompact(last.netWorth)} net worth after ${state.companySimulationYears} years.`;
+  };
+  const payoffMoment = payoffPoints.find((p) => p.loanBalance === 0);
+  const payoffNote = payoffMoment
+    ? ` Loan cleared after ${(payoffMoment.t_s / REAL_SECONDS_PER_GAME_YEAR).toFixed(1)} years.`
+    : " Loan not yet cleared in this window.";
+  summaryEl.textContent = `${describe("Reinvest", reinvestPoints)} ${describe("Pay off first", payoffPoints)}${payoffNote}`;
 }
 
 // Builds one <table class="compare-table"> (train columns via the existing
@@ -1397,19 +1598,26 @@ function renderFinance(aggregates) {
 
 // ---- orchestration ----
 //
-// recompute() re-derives and re-renders everything that depends on train/
-// route/setting state EXCEPT the train-list DOM structure and the route's
-// station/leg DOM structure — those are only rebuilt on structural changes
-// (renderTrainList/refreshTrainStrip/rebuildRoute), so in-progress edits (a
-// focused input, an open popover, an open <details> helper) survive
-// value-only changes like a quantity tweak or a distance edit. It's also
-// the single point that persists to localStorage, and is wrapped so a
-// rendering bug surfaces as a warning banner instead of a dead page.
+// recomputeNow() re-derives and re-renders everything that depends on
+// train/route/setting state EXCEPT the train-list DOM structure and the
+// route's station/leg DOM structure — those are only rebuilt on structural
+// changes (renderTrainList/refreshTrainStrip/rebuildRoute), so in-progress
+// edits (a focused input, an open popover, an open <details> helper)
+// survive value-only changes like a quantity tweak or a distance edit.
+// It's also the single point that persists to localStorage, and is wrapped
+// so a rendering bug surfaces as a warning banner instead of a dead page.
 // UI-only preferences that don't affect computed data (active tab, chip
 // view) persist directly via saveState() instead of routing through here.
 
-function recompute() {
+function recomputeNow() {
   try {
+    // Two selects, one state field (state.difficultyKey) — see
+    // initCompanyControls()'s own comment. Synced here, unconditionally,
+    // rather than in each select's own change handler, so *either* one
+    // changing (or a loaded/shared state) keeps both showing the truth.
+    document.getElementById("difficulty-select").value = state.difficultyKey;
+    document.getElementById("company-difficulty-select").value = state.difficultyKey;
+
     const aggregates = aggregatesWithLabels();
     renderTrainSpecTable(aggregates);
     renderAccelerationSection(aggregates);
@@ -1430,6 +1638,7 @@ function recompute() {
     }
     updateRouteProfileHints();
     renderExperimentalTable(); // depends on state.difficultyKey, not on trains/route -- still cheap enough to just always refresh here
+    renderCompanyTab(); // depends on state.route/difficultyKey -- same reasoning
 
     saveState(state);
   } catch (e) {
@@ -1438,9 +1647,33 @@ function recompute() {
   }
 }
 
+// The debounced entry point every event handler in this file actually
+// calls — recomputeNow() re-renders essentially the whole page (every
+// tab's charts/tables, plus the Company tab's two full discrete-event
+// simulations), so firing it synchronously on every single change event
+// causes visible jank whenever those arrive in a fast burst: holding a
+// numeric field's spinner button, scroll-wheel stepping, or a train's
+// quantity stepper all fire one native "change" per step. This collects a
+// burst into one recomputeNow() call RECOMPUTE_DELAY_MS after the last
+// change in it, rather than one per change — state mutations themselves
+// still happen synchronously in the handler as usual, so recomputeNow()
+// always renders whatever the state looked like at the moment it finally
+// runs, not a stale snapshot from whenever it was first scheduled.
+// init()'s own first render calls recomputeNow() directly instead, so the
+// page doesn't sit blank for the delay on load.
+const RECOMPUTE_DELAY_MS = 200;
+let recomputeTimer = null;
+function recompute() {
+  clearTimeout(recomputeTimer);
+  recomputeTimer = setTimeout(() => {
+    recomputeTimer = null;
+    recomputeNow();
+  }, RECOMPUTE_DELAY_MS);
+}
+
 function applyLoadedUIState() {
   document.getElementById("acceleration-detail-select").value = state.accelerationDetail;
-  document.getElementById("difficulty-select").value = state.difficultyKey;
+  // difficulty-select / company-difficulty-select: synced by recomputeNow() itself, not here — see its own comment.
   document.getElementById("finance-group-by-select").value = state.financeGroupBy;
   document.getElementById("include-stops-checkbox").checked = state.includeStopsInFinancials;
   document.getElementById("chip-view-select").value = state.chipView;
@@ -1537,13 +1770,14 @@ async function init() {
   initRouteControls();
   initFinanceControls();
   initExperimentalControls();
+  initCompanyControls();
   initShareLink();
   initTheme(() => renderCharts(aggregatesWithLabels(), state.trackSpeedLimit_kmh));
 
   applyLoadedUIState();
   renderTrainList();
   renderRoute(aggregatesWithLabels());
-  recompute(); // also renders the experimental table (see recompute())
+  recomputeNow(); // immediate, not debounced — see recompute()'s own comment for why the first render bypasses the delay
 }
 
 init().catch((err) => {

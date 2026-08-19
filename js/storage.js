@@ -114,8 +114,35 @@ export function validateState(parsed, vehicleById) {
   if (parsed.accelerationDetail === "simple" || parsed.accelerationDetail === "detailed") {
     state.accelerationDetail = parsed.accelerationDetail;
   }
-  if (["trains", "graphs", "route", "financials", "experimental"].includes(parsed.activeTab)) {
+  if (["trains", "graphs", "route", "financials", "experimental", "company"].includes(parsed.activeTab)) {
     state.activeTab = parsed.activeTab;
+  }
+
+  // Company tab (js/company.js) — only basic sanity here (range, integer,
+  // the $500k loan step); the loan-cap-by-starting-year clamp is a
+  // business rule owned by js/main.js's initCompanyControls(), which
+  // re-applies it on every load anyway, so it doesn't need duplicating
+  // here too (same reasoning as SERIES_SLOTS below: keep this module's
+  // own checks minimal and dependency-free).
+  if (typeof parsed.companyLocomotiveId === "string") state.companyLocomotiveId = parsed.companyLocomotiveId;
+  if (typeof parsed.companyWagonId === "string") state.companyWagonId = parsed.companyWagonId;
+  if (Number.isInteger(parsed.companyInitialWagonCount) && parsed.companyInitialWagonCount >= 0) {
+    state.companyInitialWagonCount = parsed.companyInitialWagonCount;
+  }
+  if (Number.isInteger(parsed.companyStartingYear) && parsed.companyStartingYear >= 1850 && parsed.companyStartingYear <= 2000) {
+    state.companyStartingYear = parsed.companyStartingYear;
+  }
+  if (typeof parsed.companyStartingCash === "number" && parsed.companyStartingCash >= 0) {
+    state.companyStartingCash = parsed.companyStartingCash;
+  }
+  if (typeof parsed.companyStartingLoan === "number" && parsed.companyStartingLoan >= 0 && parsed.companyStartingLoan % 500_000 === 0) {
+    state.companyStartingLoan = parsed.companyStartingLoan;
+  }
+  if (Number.isInteger(parsed.companyMaxWagons) && parsed.companyMaxWagons >= 1) {
+    state.companyMaxWagons = parsed.companyMaxWagons;
+  }
+  if (Number.isInteger(parsed.companySimulationYears) && parsed.companySimulationYears >= 1) {
+    state.companySimulationYears = parsed.companySimulationYears;
   }
 
   return { state, warning: warnings.length > 0 ? warnings.join(" ") : null };

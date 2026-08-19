@@ -43,7 +43,7 @@ finance-side load-factor override). See `js/train.js`.
 | `F_TE` | tractive effort, kN, **as printed** (nominal) | vehicle data (`Tractive Effort`) |
 | `V` | target/final speed, km/h | e.g. vehicle top speed, or any speed of interest |
 | `V_0` | initial speed, km/h | usually 0 |
-| `g` | gravitational acceleration | 9.81 (unconfirmed — see below) |
+| `g` | gravitational acceleration | 9.81 (confirmed — see below) |
 | `C` | rolling resistance coefficient | 0.002 |
 
 **Important:** the tractive effort actually used by the game is **double**
@@ -54,15 +54,15 @@ independently corroborated by a third-party mod (Steam Workshop
 observation of in-game behavior. Always use `F = 2·F_TE` in the physics,
 never `F_TE` directly.
 
-**`g` is not similarly confirmed** — 9.81 m/s² (real-world standard gravity)
-is assumed, not verified against the game's actual behavior. Unlike the TE
-doubling above, no source has independently corroborated this value or ruled
-out the game using something else. The Physics tab has a "Gravity" control
+**`g` is now confirmed** — 9.81 m/s² (real-world standard gravity), same as
+the TE doubling above. Verified by sweeping `0.1g` through `2.0g` in `0.1g`
+steps and comparing the resulting acceleration curve against real tf2-watcher
+captures at every step; `1.0g` is clearly the best fit, not just "close
+enough among untested alternatives." The Physics tab's "Gravity" control
 (`state.gravity_ms2` in `js/main.js`, threaded through every physics call in
-`js/physics.js`, `js/route.js`, `js/finance.js`, `js/charts.js`) specifically
-so different values can be tried against real in-game telemetry —
-see `../TODO.md` and `../../tf2-watcher/CLAUDE.md` (a sibling project
-building a Lua mod to capture that telemetry).
+`js/physics.js`, `js/route.js`, `js/finance.js`, `js/charts.js`) is hidden
+now that this is settled, but deliberately not removed — the plumbing stays
+in place in case it's ever needed again.
 
 ## Step 0 — unit conversion & derived constants
 

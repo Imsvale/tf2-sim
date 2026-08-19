@@ -83,6 +83,7 @@ export const CHART_GROUPS = {
     "chart-route-speed-crow",
     "chart-route-avgspeed-crow",
   ],
+  company: ["chart-company-networth"],
 };
 
 export function chartGroupOf(chartId) {
@@ -115,6 +116,7 @@ export const CHART_TITLES = {
   "chart-route-avgspeed-track": "Leg Profile — Track Distance — Average Speed",
   "chart-route-speed-crow": "Leg Profile — Crow-flies Distance — Speed",
   "chart-route-avgspeed-crow": "Leg Profile — Crow-flies Distance — Average Speed",
+  "chart-company-networth": "Company — Net Worth over Time",
 };
 
 // Regenerated for both modes by setRouteChartTitles() below — the fixed
@@ -218,20 +220,22 @@ function formatAxisTick(value, index, ticks) {
 // Drag directly on an axis (below the x-axis' tick labels, or left of the
 // y-axis') to scale *that axis specifically* — dragging in the axis' own
 // increasing direction (right for x, up for y) contracts the visible range
-// (zooms in); dragging back toward zero expands it (zooms out). Always
-// anchored at zero (min is
-// always 0, never negative) rather than at the cursor's value — negative
-// values are out of scope for every axis in this app (speed, time,
-// distance, money), so there's nothing meaningful on that side to reveal.
-// Scoped to outside chart.chartArea specifically so it can never compete
-// with the zoom plugin's in-area pan/drag-zoom for the same gesture. A real
-// Chart.js plugin (afterInit/destroy) rather than manual addEventListener
-// calls in renderChartInto, so cleanup is automatic on chart.destroy() — no
+// (zooms in); dragging back toward zero expands it (zooms out). Both ends
+// of the visible range scale together, by the same factor, around zero —
+// for every axis except the one Y-may-be-negative chart (Acceleration vs
+// Time, see below), the min is 0 and stays 0 (0 * anything = 0 exactly, no
+// float drift), so this reduces to the old "anchored at zero, only max
+// moves" behavior; for that one exception it generalizes correctly to a
+// negative min too, without needing a separate code path. Scoped to
+// outside chart.chartArea specifically so it can never compete with the
+// zoom plugin's in-area pan/drag-zoom for the same gesture. A real Chart.js
+// plugin (afterInit/destroy) rather than manual addEventListener calls in
+// renderChartInto, so cleanup is automatic on chart.destroy() — no
 // coordination needed with js/chartGallery.js, which already destroys the
 // previous modal chart before creating the next one.
 function createAxisDragZoomPlugin() {
   const SENSITIVITY_PX = 200; // px of drag per doubling/halving of the visible range
-  const MIN_MAX_FRACTION = 0.02; // floor on how far max can contract, relative to its drag-start value
+  const MIN_SCALE_FRACTION = 0.02; // floor on how far the range can contract, relative to its drag-start extent
   let chart, canvas, dragState = null;
 
   const relativePos = (e) => {
@@ -256,9 +260,9 @@ function createAxisDragZoomPlugin() {
       const rawDelta = currentPixel - dragState.startPixel;
       const delta = dragState.isX ? rawDelta : -rawDelta; // screen y grows downward; flip so "up" is the y-axis' positive direction
       const scaleFactor = Math.pow(2, -delta / SENSITIVITY_PX); // inverted: dragging the positive direction contracts, not expands
-      const { axis, startMax } = dragState;
-      const newMax = Math.max(startMax * scaleFactor, startMax * MIN_MAX_FRACTION);
-      chart.zoomScale(axis.id, { min: 0, max: newMax }, "none");
+      const { axis, startMin, startMax } = dragState;
+      const clampedFactor = Math.max(scaleFactor, MIN_SCALE_FRACTION);
+      chart.zoomScale(axis.id, { min: startMin * clampedFactor, max: startMax * clampedFactor }, "none");
       return;
     }
     // Not dragging: just hint that this zone is draggable.
@@ -272,7 +276,7 @@ function createAxisDragZoomPlugin() {
     if (!hit || hit.axis.type !== "linear") return; // category axes (bar chart x) aren't continuously scalable this way
     const pos = relativePos(e);
     const startPixel = hit.isX ? pos.x : pos.y;
-    dragState = { axis: hit.axis, isX: hit.isX, startPixel, startMax: hit.axis.max };
+    dragState = { axis: hit.axis, isX: hit.isX, startPixel, startMin: hit.axis.min, startMax: hit.axis.max };
     e.preventDefault();
   };
 
@@ -289,7 +293,16 @@ function createAxisDragZoomPlugin() {
       document.addEventListener("mousemove", onMouseMove);
       document.addEventListener("mouseup", onMouseUp);
     },
-    destroy() {
+    // Chart.js's actual plugin-teardown hook is afterDestroy — a plain
+    // "destroy" here is never called (verified empirically: Chart.js v4
+    // fires beforeDestroy/afterDestroy/uninstall on chart.destroy(), not
+    // "destroy"), so this cleanup was silently dead code. Left unnoticed
+    // long enough that these document-level listeners leaked on every
+    // gallery close, each one still closing over its now-destroyed chart's
+    // canvas — the next drag on any *other* chart would trigger all the
+    // leaked listeners too, each trying to zoomScale() a chart whose
+    // canvas context is already null.
+    afterDestroy() {
       canvas.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
@@ -431,8 +444,11 @@ export function renderChartInto(canvas, config, { zoomEnabled = false } = {}) {
               // Wheel-zoom-out and pan can otherwise drift below zero same
               // as drag could before the axisDragZoom plugin's own
               // zero-anchor fix — negative values are out of scope for
-              // every axis here (speed, time, distance, money).
-              limits: { x: { min: 0 }, y: { min: 0 } },
+              // every axis here (speed, time, distance, money) except one:
+              // Acceleration vs Time legitimately dips negative (braking),
+              // so its y-axis opts out via config.yMayBeNegative — x (time)
+              // stays anchored at 0 regardless, that's never negative here.
+              limits: { x: { min: 0 }, y: config.yMayBeNegative ? {} : { min: 0 } },
             }
           : undefined,
       },
@@ -522,6 +538,42 @@ export function renderFinanceCharts(trains, legLabels) {
     });
     renderCardChart(metric.id, { type: "bar", xLabels: legLabels, yLabel: metric.yLabel, isMoney: metric.isMoney, datasets });
   }
+}
+
+/**
+ * The two strategies' net-worth trajectories, side by side — x is calendar
+ * year (`startingYear + t_s / REAL_SECONDS_PER_GAME_YEAR`, ties into the
+ * loan-cap-by-year framing on the Company tab), y is net worth (can go
+ * negative — a strategy running a temporary cash crunch near the end of a
+ * loan paydown cycle is a real, informative outcome, not a bug — so this
+ * chart opts into `yMayBeNegative`, same as the Acceleration vs Time
+ * chart). Either points array may be null (js/company.js's
+ * simulateCompany() returns null when the scenario can't even afford its
+ * initial purchase) — that dataset is just omitted, not an error.
+ *
+ * @param {Array<{t_s: number, netWorth: number}>|null} reinvestPoints
+ * @param {Array<{t_s: number, netWorth: number}>|null} payoffPoints
+ * @param {number} startingYear
+ * @param {number} realSecondsPerGameYear - js/finance.js's REAL_SECONDS_PER_GAME_YEAR
+ */
+export function renderCompanyChart(reinvestPoints, payoffPoints, startingYear, realSecondsPerGameYear) {
+  const toYear = (t_s) => startingYear + t_s / realSecondsPerGameYear;
+  const datasets = [];
+  if (reinvestPoints) {
+    datasets.push({
+      label: "Reinvest in wagons",
+      seriesIndex: 0,
+      points: reinvestPoints.map((p) => ({ x: toYear(p.t_s), y: p.netWorth })),
+    });
+  }
+  if (payoffPoints) {
+    datasets.push({
+      label: "Pay off loan, then invest",
+      seriesIndex: 1,
+      points: payoffPoints.map((p) => ({ x: toYear(p.t_s), y: p.netWorth })),
+    });
+  }
+  renderCardChart("chart-company-networth", { xLabel: "Year", yLabel: "Net worth ($)", isMoney: true, yMayBeNegative: true, datasets });
 }
 
 // Walks a chronologically-ordered, already offset sample set (see
@@ -744,7 +796,7 @@ export function renderRouteProfileCharts(trains, leg, options) {
   renderCardChart("chart-route-avgspeed-time", { xLabel: "Time (s)", yLabel: "Average speed (crow-flies, km/h)", datasets: avgSpeedTimeDatasets });
   renderCardChart("chart-route-distance-track-time", { xLabel: "Time (s)", yLabel: "Distance (m)", datasets: distanceTrackTimeDatasets });
   renderCardChart("chart-route-distance-crow-time", { xLabel: "Time (s)", yLabel: "Crow-flies distance (m)", datasets: distanceCrowTimeDatasets });
-  renderCardChart("chart-route-accel-time", { xLabel: "Time (s)", yLabel: "Acceleration (m/s²)", datasets: accelTimeDatasets });
+  renderCardChart("chart-route-accel-time", { xLabel: "Time (s)", yLabel: "Acceleration (m/s²)", datasets: accelTimeDatasets, yMayBeNegative: true });
   renderCardChart("chart-route-speed-track", { xLabel: "Track distance (m)", yLabel: "Speed (km/h)", datasets: speedTrackDatasets });
   renderCardChart("chart-route-avgspeed-track", { xLabel: "Track distance (m)", yLabel: "Average speed (km/h)", datasets: avgSpeedTrackDatasets });
   renderCardChart("chart-route-speed-crow", { xLabel: "Crow-flies distance (m)", yLabel: "Speed (km/h)", datasets: speedCrowDatasets });
@@ -931,7 +983,7 @@ export function renderRouteProfileChartsForRoute(trains, route, options) {
   renderCardChart("chart-route-avgspeed-time", { xLabel: "Time (s)", yLabel: "Average speed (crow-flies, km/h)", datasets: avgSpeedTimeDatasets });
   renderCardChart("chart-route-distance-track-time", { xLabel: "Time (s)", yLabel: "Distance (m)", datasets: distanceTrackTimeDatasets });
   renderCardChart("chart-route-distance-crow-time", { xLabel: "Time (s)", yLabel: "Crow-flies distance (m)", datasets: distanceCrowTimeDatasets });
-  renderCardChart("chart-route-accel-time", { xLabel: "Time (s)", yLabel: "Acceleration (m/s²)", datasets: accelTimeDatasets });
+  renderCardChart("chart-route-accel-time", { xLabel: "Time (s)", yLabel: "Acceleration (m/s²)", datasets: accelTimeDatasets, yMayBeNegative: true });
   renderCardChart("chart-route-speed-track", { xLabel: "Track distance (m)", yLabel: "Speed (km/h)", datasets: speedTrackDatasets });
   renderCardChart("chart-route-avgspeed-track", { xLabel: "Track distance (m)", yLabel: "Average speed (km/h)", datasets: avgSpeedTrackDatasets });
   renderCardChart("chart-route-speed-crow", { xLabel: "Crow-flies distance (m)", yLabel: "Speed (km/h)", datasets: speedCrowDatasets });

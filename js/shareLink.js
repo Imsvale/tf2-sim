@@ -28,6 +28,14 @@ const SHAREABLE_FIELDS = [
   "difficultyKey",
   "includeStopsInFinancials",
   "selectedLegIndex",
+  "companyLocomotiveId",
+  "companyWagonId",
+  "companyInitialWagonCount",
+  "companyStartingYear",
+  "companyStartingCash",
+  "companyStartingLoan",
+  "companyMaxWagons",
+  "companySimulationYears",
 ];
 
 /** @param {boolean} includeActiveTab defaults to true — see module comment on why it's optional. */
